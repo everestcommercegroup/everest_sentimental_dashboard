@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+slack_sdk
+pymongo
+openai==0.28
+
+python-dotenv

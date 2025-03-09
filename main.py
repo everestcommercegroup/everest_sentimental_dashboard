@@ -1,0 +1,587 @@
+# backend_full.py
+
+import os
+import datetime
+from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
+from dotenv import load_dotenv
+import openai
+from bson.objectid import ObjectId
+
+# Load environment variables
+load_dotenv()
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+DB_NAME = os.getenv("DB_NAME", "ecommerce_sentiment")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_openai_api_key")
+openai.api_key = OPENAI_API_KEY
+
+app = FastAPI(title="Customer Feedback Dashboard Backend")
+
+# Enable CORS so frontend can access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+client = MongoClient(MONGO_URI)
+db = client[DB_NAME]
+reviews_collection = db["sentimental_analysis"]
+
+# --- Pydantic Models ---
+class OverallReport(BaseModel):
+    overall_sentiment: dict
+    total_reviews: int
+    last_updated: datetime.datetime
+
+class DetailedReport(BaseModel):
+    overall_sentiment: dict
+    overall_sentiment_detail: dict
+    overall_sentimental_category: dict
+    total_reviews: int
+    last_updated: datetime.datetime
+
+class TrendReport(BaseModel):
+    trends: list  # List of dicts: { "month": "YYYY-MM", "positive": X, "negative": Y, "neutral": Z }
+
+class NegativeTrendReport(BaseModel):
+    trends: list  # List of dicts: { "month": "YYYY-MM", "negative": X }
+
+class PlatformComparisonReport(BaseModel):
+    comparison: dict  # e.g., { "gorgias": {"positive": ..., "negative": ..., "neutral": ...}, ... }
+
+class RiskAlert(BaseModel):
+    alert: str
+
+# at the top of your file
+from typing import List, Dict, Any
+
+class ProsConsReport(BaseModel):
+    pros: List[Dict[str, Any]]
+    cons: List[Dict[str, Any]]
+
+
+class TopProsConsReport(BaseModel):
+    top_pros: dict  # e.g., { "feature1": count, ... }
+    top_cons: dict
+
+class ChatMessage(BaseModel):
+    session_id: str
+    message: str
+    history: list = []
+
+# --- Helper Functions ---
+
+def parse_date(date_str: str):
+    try:
+        return datetime.datetime.fromisoformat(date_str)
+    except Exception:
+        return None
+
+def build_time_filter(start_date: str = None, end_date: str = None):
+    filter_query = {}
+    if start_date:
+        sd = parse_date(start_date)
+        if sd:
+            filter_query["$gte"] = sd
+    if end_date:
+        ed = parse_date(end_date)
+        if ed:
+            filter_query["$lte"] = ed
+    return filter_query if filter_query else None
+
+def common_match(platform: str = None, start_date: str = None, end_date: str = None):
+    match = {}
+    # If platform is provided
+    if platform:
+        match["platform"] = platform
+    # If time filter is provided
+    time_filter = build_time_filter(start_date, end_date)
+    if time_filter:
+        match["time_period"] = time_filter
+    return match
+
+# 1) Overall Sentiment Distribution (platform wise)
+@app.get("/report/overall_by_platform", response_model=OverallReport)
+def overall_by_platform(
+    platform: str = Query(None),
+    days: int = Query(30)  # instead of start_date/end_date, we use days (default 30)
+):
+    # Compute the current time and the start date based on the days parameter
+    now = datetime.datetime.utcnow()
+    start = now - datetime.timedelta(days=days)
+    
+    # Build the query filter using start and now as the time period
+    base_match = common_match(platform, start.isoformat(), now.isoformat())
+    base_match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
+    
+    total = reviews_collection.count_documents(base_match)
+    if total == 0:
+        raise HTTPException(status_code=404, detail="No review data found")
+    
+    pipeline = [
+        {"$match": base_match},
+        {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
+    ]
+    results = list(reviews_collection.aggregate(pipeline))
+    overall = {doc["_id"]: round((doc["count"] / total) * 100, 2) for doc in results}
+    
+    latest_doc = reviews_collection.find_one(base_match, sort=[("time_period", -1)])
+    last_updated = latest_doc.get("time_period", now)
+    
+    return OverallReport(
+        overall_sentiment=overall,
+        total_reviews=total,
+        last_updated=last_updated
+    )
+
+
+# 2) Line chart for overall sentiment trends (monthly aggregation)
+@app.get("/report/trends", response_model=TrendReport)
+def report_trends(
+    platform: str = Query(None),
+    days: int = Query(30)  # default 30 days
+):
+    try:
+        now = datetime.datetime.utcnow()
+        start = now - datetime.timedelta(days=days)
+        
+        match = common_match(platform, start.isoformat(), now.isoformat())
+        match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
+        
+        pipeline = [
+            {"$match": match},
+            {"$project": {
+                "year_month": {"$dateToString": {"format": "%Y-%m", "date": "$time_period"}},
+                "overall_sentiment": 1
+            }},
+            {"$group": {
+                "_id": {"year_month": "$year_month", "sentiment": "$overall_sentiment"},
+                "count": {"$sum": 1}
+            }},
+            {"$group": {
+                "_id": "$_id.year_month",
+                "sentiments": {"$push": {"sentiment": "$_id.sentiment", "count": "$count"}}
+            }},
+            {"$sort": {"_id": 1}}
+        ]
+        
+        results = list(reviews_collection.aggregate(pipeline))
+        trends = []
+        for doc in results:
+            month = doc["_id"]
+            data = {"month": month, "positive": 0, "negative": 0, "neutral": 0}
+            for item in doc["sentiments"]:
+                data[item["sentiment"]] = item["count"]
+            trends.append(data)
+        
+        return TrendReport(trends=trends)
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 3) Average negative trends and monthly spike analysis (platform & overall)
+@app.get("/report/negative_trends", response_model=NegativeTrendReport)
+def negative_trends(platform: str = Query(None), start_date: str = Query(None), end_date: str = Query(None)):
+    try:
+        match = common_match(platform, start_date, end_date)
+        match["overall_sentiment"] = "negative"
+        pipeline = [
+            {"$match": match},
+            {"$project": {
+                "year_month": {"$dateToString": {"format": "%Y-%m", "date": "$time_period"}}
+            }},
+            {"$group": {
+                "_id": "$year_month",
+                "negative_count": {"$sum": 1}
+            }},
+            {"$sort": {"_id": 1}}
+        ]
+        results = list(reviews_collection.aggregate(pipeline))
+        trends = []
+        for doc in results:
+            trends.append({"month": doc["_id"], "negative": doc["negative_count"]})
+        return NegativeTrendReport(trends=trends)
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 4) Pros and Cons via GPT: Top 10 repeated positive as pros and top 10 negative as cons
+@app.get("/report/pros_cons", response_model=ProsConsReport)
+def pros_cons(
+    platform: str = Query(None),
+    start_date: str = Query(None),
+    end_date: str = Query(None)
+):
+    """
+    Returns a structured list of pros and cons from GPT,
+    each as { "text": <string>, "count": <int> } objects.
+    """
+    try:
+        # 1) Build the query filter
+        match = common_match(platform, start_date, end_date)
+
+        # 2) Aggregation pipeline: top 10 positive, top 10 negative
+        positive_pipeline = [
+            {"$match": {**match, "overall_sentiment": "positive"}},
+            {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 10}
+        ]
+        negative_pipeline = [
+            {"$match": {**match, "overall_sentiment": "negative"}},
+            {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 10}
+        ]
+
+        # 3) Fetch from MongoDB
+        pos_results = list(reviews_collection.aggregate(positive_pipeline))
+        neg_results = list(reviews_collection.aggregate(negative_pipeline))
+
+        # 4) Create big strings to pass to GPT
+        pros_text = " ; ".join([doc["_id"] for doc in pos_results if doc["_id"]])
+        cons_text = " ; ".join([doc["_id"] for doc in neg_results if doc["_id"]])
+
+        # 5) Talk to GPT for a "summary" style. Adjust your prompt as needed.
+        prompt = (
+            f"Here are the top positive points:\n{pros_text}\n\n"
+            f"And here are the top negative points:\n{cons_text}\n\n"
+            "Please summarize them in the format:\n\n"
+            "Pros:\n- <pro1>\n- <pro2>\n\nCons:\n- <con1>\n- <con2>\n"
+            "No extra text, just a clear list of pros and cons with dashes."
+        )
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",  # or your chosen model
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=200
+        )
+        reply_str = response.choices[0].message.content.strip()
+
+        # 6) Parse GPT response line-by-line into arrays
+        pros_list = []
+        cons_list = []
+        current_section = None
+
+        for line in reply_str.splitlines():
+            line_stripped = line.strip()
+            line_lower = line_stripped.lower()
+
+            # Detect section headings
+            if line_lower.startswith("pros:"):
+                current_section = "pros"
+                continue
+            elif line_lower.startswith("cons:"):
+                current_section = "cons"
+                continue
+
+            # If it's a bullet under "Pros", store it
+            if current_section == "pros" and line_stripped.startswith("-"):
+                # remove the dash, strip again
+                item_text = line_stripped.lstrip("-").strip()
+                if item_text:
+                    pros_list.append({"text": item_text, "count": 1})
+
+            # If it's a bullet under "Cons", store it
+            elif current_section == "cons" and line_stripped.startswith("-"):
+                item_text = line_stripped.lstrip("-").strip()
+                if item_text:
+                    cons_list.append({"text": item_text, "count": 1})
+
+        # 7) Return as structured data
+        return ProsConsReport(pros=pros_list, cons=cons_list)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 5) Table for top 10 negative, positive, neutral categories (grouped by overall_sentimental_category)
+@app.get("/report/category_table")
+def category_table(platform: str = Query(None), sentiment: str = Query(None), limit: int = Query(10), start_date: str = Query(None), end_date: str = Query(None)):
+    try:
+        match = common_match(platform, start_date, end_date)
+        # Only consider reviews with non-empty overall_sentimental_category
+        match["overall_sentimental_category"] = {"$ne": ""}
+        if sentiment:
+            match["overall_sentiment"] = sentiment
+        pipeline = [
+            {"$match": match},
+            {"$group": {"_id": "$overall_sentimental_category", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": limit}
+        ]
+        results = list(reviews_collection.aggregate(pipeline))
+        table = [{"category": doc["_id"], "count": doc["count"]} for doc in results]
+        return {"table": table}
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 6) Filter control for time period for overall sentiment, detail, and category (reuse endpoints with time filters)
+# Already covered in /report/overall_by_platform and /report/detailed if we add start_date/end_date parameters.
+@app.get("/report/detailed", response_model=DetailedReport)
+def detailed_report(platform: str = Query(None), start_date: str = Query(None), end_date: str = Query(None), limit: int = Query(10)):
+    try:
+        base_match = common_match(platform, start_date, end_date)
+        # Overall Sentiment
+        base_match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
+        total = reviews_collection.count_documents(base_match)
+        if total == 0:
+            raise HTTPException(status_code=404, detail="No review data found")
+        pipeline_overall = [
+            {"$match": base_match},
+            {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
+        ]
+        overall_results = list(reviews_collection.aggregate(pipeline_overall))
+        overall = {doc["_id"]: round((doc["count"] / total) * 100, 2) for doc in overall_results}
+        # overall_sentiment_detail aggregation
+        pipeline_detail = [
+            {"$match": {**base_match, "overall_sentiment_detail": {"$ne": ""}}},
+            {"$group": {"_id": "$overall_sentiment_detail", "count": {"$sum": 1}}}
+        ]
+        detail_results = list(reviews_collection.aggregate(pipeline_detail))
+        detail = {doc["_id"]: round((doc["count"] / total) * 100, 2) for doc in detail_results}
+        # overall_sentimental_category aggregation
+        pipeline_category = [
+            {"$match": {**base_match, "overall_sentimental_category": {"$ne": ""}}},
+            {"$group": {"_id": "$overall_sentimental_category", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": limit}
+        ]
+        category_results = list(reviews_collection.aggregate(pipeline_category))
+        category = {doc["_id"]: doc["count"] for doc in category_results}
+        latest_doc = reviews_collection.find_one(base_match, sort=[("time_period", -1)])
+        last_updated = latest_doc.get("time_period", datetime.datetime.utcnow())
+        return DetailedReport(
+            overall_sentiment=overall,
+            overall_sentiment_detail=detail,
+            overall_sentimental_category=category,
+            total_reviews=total,
+            last_updated=last_updated
+        )
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 7) Top 5 pros and top 5 cons summary (from review text frequency)
+@app.get("/report/top_pros_cons", response_model=TopProsConsReport)
+def top_pros_cons(platform: str = Query(None), start_date: str = Query(None), end_date: str = Query(None)):
+    try:
+        match = common_match(platform, start_date, end_date)
+        # For simplicity, assume positive reviews are pros and negative reviews are cons
+        pos_pipeline = [
+            {"$match": {**match, "overall_sentiment": "positive", "overall_summary": {"$ne": ""}}},
+            {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 5}
+        ]
+        neg_pipeline = [
+            {"$match": {**match, "overall_sentiment": "negative", "overall_summary": {"$ne": ""}}},
+            {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 5}
+        ]
+        pos_results = list(reviews_collection.aggregate(pos_pipeline))
+        neg_results = list(reviews_collection.aggregate(neg_pipeline))
+        top_pros = {doc["_id"]: doc["count"] for doc in pos_results}
+        top_cons = {doc["_id"]: doc["count"] for doc in neg_results}
+        return TopProsConsReport(top_pros=top_pros, top_cons=top_cons)
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 8) Line/Area chart for monthly sentiment distribution (reuse /report/trends endpoint) 
+# (Already created above as /report/trends)
+
+# 9) Platform Comparison: grouped bar chart comparing each platform's sentiment distribution
+
+class PlatformComparisonItem(BaseModel):
+    platform: str
+    positive: float
+    negative: float
+    neutral: float
+
+class PlatformComparisonResponse(BaseModel):
+    platforms: List[PlatformComparisonItem]
+
+@app.get("/report/platform_comparison", response_model=PlatformComparisonResponse)
+def platform_comparison(days: int = Query(30)):
+    try:
+        now = datetime.datetime.utcnow()
+        start = now - datetime.timedelta(days=days)
+        
+        platforms = ["gorgias", "trustpilot", "opencx"]
+        data_list = []
+        
+        for p in platforms:
+            match = common_match(p, start.isoformat(), now.isoformat())
+            match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
+            
+            total = reviews_collection.count_documents(match)
+            if total == 0:
+                data_list.append({
+                    "platform": p,
+                    "positive": 0,
+                    "negative": 0,
+                    "neutral": 0
+                })
+                continue
+            
+            pipeline = [
+                {"$match": match},
+                {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
+            ]
+            results = list(reviews_collection.aggregate(pipeline))
+            
+            # Compute percentages
+            pos, neg, neu = 0.0, 0.0, 0.0
+            for doc in results:
+                if doc["_id"] == "positive":
+                    pos = round((doc["count"] / total) * 100, 2)
+                elif doc["_id"] == "negative":
+                    neg = round((doc["count"] / total) * 100, 2)
+                elif doc["_id"] == "neutral":
+                    neu = round((doc["count"] / total) * 100, 2)
+            
+            data_list.append({
+                "platform": p,
+                "positive": pos,
+                "negative": neg,
+                "neutral":  neu
+            })
+        
+        return PlatformComparisonResponse(platforms=data_list)
+    
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# 10) Potential Risks: Textual highlight for negative sentiment spike (e.g., compare last 30 days vs previous 30 days)
+from typing import List
+import datetime
+from pydantic import BaseModel
+
+class SingleAlert(BaseModel):
+    message: str
+    severity: str
+    timestamp: str
+
+class RiskAlertsResponse(BaseModel):
+    alerts: List[SingleAlert]
+
+
+# @app.get("/report/risk_alerts", response_model=RiskAlertsResponse)
+# def risk_alerts(platform: str = Query(None)):
+#     """
+#     Return an array of alerts, each containing:
+#       - message: string
+#       - severity: "high" | "medium" | "low"
+#       - timestamp: ISO datetime string
+#     """
+#     try:
+#         today = datetime.datetime.utcnow()
+#         last_30 = today - datetime.timedelta(days=30)
+#         prev_30 = last_30 - datetime.timedelta(days=30)
+
+#         # Match for last 30 days
+#         recent_match = common_match(platform, last_30.isoformat(), today.isoformat())
+#         recent_match["overall_sentiment"] = "negative"
+#         recent_count = reviews_collection.count_documents(recent_match)
+
+#         # Match for previous 30 days
+#         prev_match = common_match(platform, prev_30.isoformat(), last_30.isoformat())
+#         prev_match["overall_sentiment"] = "negative"
+#         prev_count = reviews_collection.count_documents(prev_match)
+
+#         alerts_list = []  # Will store SingleAlert objects
+
+#         if prev_count > 0:
+#             change = ((recent_count - prev_count) / prev_count) * 100
+#             if change > 10:
+#                 # Large spike in negative sentiment => high severity alert
+#                 alerts_list.append(
+#                     SingleAlert(
+#                         message=f"Negative sentiment rose by {round(change,2)}% in the last 30 days",
+#                         severity="high",
+#                         timestamp=datetime.datetime.utcnow().isoformat()
+#                     )
+#                 )
+#             else:
+#                 # No significant spike => optional: low severity or no alert
+#                 alerts_list.append(
+#                     SingleAlert(
+#                         message="No significant spike in negative sentiment.",
+#                         severity="low",
+#                         timestamp=datetime.datetime.utcnow().isoformat()
+#                     )
+#                 )
+#         else:
+#             # Not enough data in the previous 30 days => optional alert
+#             alerts_list.append(
+#                 SingleAlert(
+#                     message="Insufficient data for previous period comparison.",
+#                     severity="low",
+#                     timestamp=datetime.datetime.utcnow().isoformat()
+#                 )
+#             )
+
+#         return RiskAlertsResponse(alerts=alerts_list)
+
+#     except PyMongoError as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.get("/reviews")
+def get_reviews(
+  sentiment: str = Query(None),
+  platform: str = Query(None),
+  skip: int = Query(0),
+  limit: int = Query(20)
+):
+    query = {}
+    if sentiment:
+        query["overall_sentiment"] = sentiment
+    if platform:
+        query["platform"] = platform
+    try:
+        reviews = list(reviews_collection.find(query).skip(skip).limit(limit))
+        for review in reviews:
+            review["_id"] = str(review["_id"])
+        return {"reviews": reviews}
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Chat endpoint remains the same
+@app.post("/chat")
+def chat_with_report(chat: ChatMessage):
+    try:
+        # Use overall report for context
+        overall, _, _ = overall_by_platform().dict()
+        context = "Overall sentiment: " + ", ".join([f"{k}: {v}%" for k, v in overall.items()])
+    except Exception:
+        context = "No report data available."
+    prompt = f"Report Context: {context}\nUser: {chat.message}\n"
+    if chat.history:
+        for h in chat.history:
+            prompt += f"{h.get('role')}: {h.get('content')}\n"
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=250
+        )
+        reply = response.choices[0].message.content.strip()
+        return {"session_id": chat.session_id, "reply": reply}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)

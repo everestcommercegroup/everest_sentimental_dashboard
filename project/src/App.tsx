@@ -547,7 +547,7 @@ function App() {
       <div className="ml-20 p-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
-            Sentiment Analysis Dashboard
+          Peak by Everest
           </h1>
           <p className="text-gray-400">Real-time customer feedback analysis</p>
         </header>

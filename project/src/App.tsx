@@ -1,7 +1,25 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
-import { LineChart as LineChartIcon, BarChart as BarChartIcon, CircleSlash, AlertTriangle, ThumbsUp, ThumbsDown, Minus, ChevronRight, PieChart as PieChartIcon, Clock } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, Area, AreaChart } from 'recharts';
+import {
+  X,
+  LineChart as LineChartIcon,
+  BarChart as BarChartIcon,
+  CircleSlash,
+  AlertTriangle,
+  ThumbsUp,
+  ThumbsDown,
+  Minus,
+  ChevronRight,
+  FolderHeart,
+  PieChart as PieChartIcon,
+  CheckCircle2,
+  XCircle,
+  Tag,
+  ListChecks,
+  ChevronDown
+} from 'lucide-react';
+
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, Area, AreaChart, ReferenceLine, Cell, PieChart, Pie } from 'recharts';
 import { ResponsivePie } from '@nivo/pie';
 import { safeNumber, safeString, createSafeObject, createPieData } from './utils/chart-helpers';
 
@@ -11,6 +29,14 @@ interface OverallReport {
     positive: number;
     negative: number;
     neutral: number;
+  };
+  total_reviews: number;
+  last_updated: string;
+}
+
+interface OverallDetailReport {
+  overall_sentiment_detail: {
+    [key: string]: number;
   };
   total_reviews: number;
   last_updated: string;
@@ -46,12 +72,42 @@ interface RiskAlert {
   timestamp: string;
 }
 
+interface DetailCategory {
+  overall_sentiment_detail: string;
+  categories: string[];
+  overall_sentimental_categories: string[];
+}
+
+interface DetailCategoryReport {
+  details: DetailCategory[];
+}
+
+// Emotion color mapping
+const emotionColors: { [key: string]: string } = {
+  angry: '#EF4444',
+  disappointed: '#F97316',
+  dissatisfied: '#F59E0B',
+  frustrated: '#EAB308',
+  happy: '#10B981',
+  neutral: '#6B7280',
+  sad: '#6366F1',
+  satisfied: '#22C55E'
+};
+
 function App() {
+
+  const [selectedEmotion, setSelectedEmotion] = useState<string | null>(null);
+  const [categoryDetails, setCategoryDetails] = useState<DetailCategory | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedPlatform, setSelectedPlatform] = useState('all');
   const [timeFilter, setTimeFilter] = useState('30');
   const [overallData, setOverallData] = useState<OverallReport>({
     overall_sentiment: { positive: 0, negative: 0, neutral: 0 },
+    total_reviews: 0,
+    last_updated: new Date().toISOString()
+  });
+  const [emotionalData, setEmotionalData] = useState<OverallDetailReport>({
+    overall_sentiment_detail: {},
     total_reviews: 0,
     last_updated: new Date().toISOString()
   });
@@ -66,15 +122,55 @@ function App() {
   const [showAllPositive, setShowAllPositive] = useState(false);
   const [showAllNegative, setShowAllNegative] = useState(false);
 
-  const API_BASE_URL = 'https://everest-sentimental-dashboard-backend.onrender.com';
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+const [categoryAnalysis, setCategoryAnalysis] = useState<CategoryAnalysis | null>(null);
+const [expandedSection, setExpandedSection] = useState<'pros' | 'cons' | 'sentiment' | null>(null);
+const [categories] = useState<string[]>([
+  'Customer Service',
+  'Product Quality',
+  'Returns & Refunds',
+  'Website Performance',
+  'Order Fulfillment',
+  'Shipping',
+  'Checkout Experience',
+  'Payment & Billing',
+  'Delivery Partner Issues',
+  'Pricing & Discounts'
+]);
 
-  const processFeedbackData = useCallback((data: unknown): TopFeedback[] => {
-    if (!Array.isArray(data)) return [];
-    
-    return data.map(item => ({
-      category: safeString((item as any)?.category),
-      count: safeNumber((item as any)?.count)
-    })).filter(item => item.category && item.count > 0);
+
+
+
+  const API_BASE_URL = 'http://127.0.0.1:8080';
+
+  const fetchCategoryAnalysis = useCallback(async (category: string) => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/report/category_analysis`, {
+        params: { category }
+      });
+      setCategoryAnalysis(response.data);
+      setSelectedCategory(category);
+    } catch (err) {
+      console.error('Error fetching category analysis:', err);
+      setError('Failed to fetch category analysis');
+    }
+  }, [API_BASE_URL]);
+  
+
+  const processEmotionalData = useCallback((data: any): OverallDetailReport => {
+    const defaultData: OverallDetailReport = {
+      overall_sentiment_detail: {},
+      total_reviews: 0,
+      last_updated: new Date().toISOString()
+    };
+
+    if (!data || typeof data !== 'object') return defaultData;
+
+    return {
+      overall_sentiment_detail: data.overall_sentiment_detail || {},
+      total_reviews: safeNumber(data.total_reviews),
+      last_updated: safeString(data.last_updated) || defaultData.last_updated
+    };
   }, []);
 
   const processOverallData = useCallback((data: unknown): OverallReport => {
@@ -96,6 +192,15 @@ function App() {
       total_reviews: safeNumber(safeData?.total_reviews),
       last_updated: safeString(safeData?.last_updated) || defaultData.last_updated
     };
+  }, []);
+
+  const processFeedbackData = useCallback((data: unknown): TopFeedback[] => {
+    if (!Array.isArray(data)) return [];
+    
+    return data.map(item => ({
+      category: safeString((item as any)?.category),
+      count: safeNumber((item as any)?.count)
+    })).filter(item => item.category && item.count > 0);
   }, []);
 
   const processTrendData = useCallback((data: unknown): TrendData[] => {
@@ -132,6 +237,7 @@ function App() {
 
       const [
         overallRes,
+        emotionalRes,
         trendRes,
         positiveRes,
         negativeRes,
@@ -140,6 +246,8 @@ function App() {
         riskAlertsRes
       ] = await Promise.all([
         axios.get(`${API_BASE_URL}/report/overall_by_platform`, { params })
+          .catch(() => ({ data: null })),
+        axios.get(`${API_BASE_URL}/report/overall_detail`, { params })
           .catch(() => ({ data: null })),
         axios.get(`${API_BASE_URL}/report/trends`, { params })
           .catch(() => ({ data: { trends: [] } })),
@@ -158,6 +266,7 @@ function App() {
       ]);
 
       setOverallData(processOverallData(overallRes.data));
+      setEmotionalData(processEmotionalData(emotionalRes.data));
       setTrendData(processTrendData(trendRes.data?.trends));
       setPositiveFeedback(processFeedbackData(positiveRes.data?.table));
       setCriticalIssues(processFeedbackData(negativeRes.data?.table));
@@ -177,6 +286,7 @@ function App() {
     showAllPositive,
     showAllNegative,
     processOverallData,
+    processEmotionalData,
     processTrendData,
     processFeedbackData,
     processComparisonData
@@ -190,6 +300,24 @@ function App() {
     createPieData(overallData.overall_sentiment),
     [overallData.overall_sentiment]
   );
+
+  const emotionalChartData = useMemo(() => {
+    return Object.entries(emotionalData.overall_sentiment_detail).map(([emotion, value]) => ({
+      emotion,
+      value,
+      color: emotionColors[emotion] || '#6B7280'
+    })).sort((a, b) => b.value - a.value);
+  }, [emotionalData.overall_sentiment_detail]);
+
+  const positiveAverage = useMemo(() => {
+    if (!trendData.length) return 0;
+    return trendData.reduce((sum, item) => sum + item.positive, 0) / trendData.length;
+  }, [trendData]);
+
+  const negativeAverage = useMemo(() => {
+    if (!trendData.length) return 0;
+    return trendData.reduce((sum, item) => sum + item.negative, 0) / trendData.length;
+  }, [trendData]);
 
   // Platform selector component
   const PlatformSelector = () => (
@@ -211,11 +339,451 @@ function App() {
       </div>
     </div>
   );
+  const CategoryAnalysisSection = () => {
+    if (!categoryAnalysis) return null;
+  
+    const sentimentData = [
+      { name: 'Positive', value: categoryAnalysis.sentiment_counts.positive, color: '#10B981' },
+      { name: 'Negative', value: categoryAnalysis.sentiment_counts.negative, color: '#EF4444' },
+      { name: 'Neutral', value: categoryAnalysis.sentiment_counts.neutral, color: '#6B7280' }
+    ];
+  
+    const detailData = Object.entries(categoryAnalysis.detail_counts).map(([key, value]) => ({
+      name: key.charAt(0).toUpperCase() + key.slice(1),
+      value,
+      color: emotionColors[key] || '#6B7280'
+    }));
+  
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-bold text-white">
+            Category Analysis: {categoryAnalysis.category}
+          </h2>
+          <button
+            onClick={() => setSelectedCategory(null)}
+            className="p-2 hover:bg-white/10 rounded-lg transition-all"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+  
+        {/* Sentiment and Detail Counts as cards with emoticons */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Sentiment Distribution Card */}
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Sentiment Distribution</h3>
+              <button
+                onClick={() => setExpandedSection(expandedSection === 'sentiment' ? null : 'sentiment')}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <ChevronDown className={`w-5 h-5 transform transition-transform ${expandedSection === 'sentiment' ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={sentimentData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    label
+                  >
+                    {sentimentData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '8px'
+                  }} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+  
+          {/* Emotional Distribution Card */}
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+            <h3 className="text-lg font-semibold mb-4">Emotional Distribution</h3>
+            <div className="space-y-4">
+              {detailData.map((item) => (
+                <div key={item.name} className="relative">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm text-gray-400">{item.name}</span>
+                    <span className="text-sm font-medium">{item.value}</span>
+                  </div>
+                  <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${(item.value / Math.max(...detailData.map(d => d.value))) * 100}%`,
+                        backgroundColor: item.color
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+  
+        {/* Cards for Pros and Cons with emoticons */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Pros Card */}
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-green-500" />
+                <h3 className="text-lg font-semibold">Pros</h3>
+              </div>
+              <button
+                onClick={() => setExpandedSection(expandedSection === 'pros' ? null : 'pros')}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <ChevronDown className={`w-5 h-5 transform transition-transform ${expandedSection === 'pros' ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              {categoryAnalysis.pros.map((pro, index) => (
+                <div
+                  key={index}
+                  className="p-3 bg-green-500/5 rounded-lg border border-green-500/10 hover:bg-green-500/10 transition-colors"
+                >
+                  <p className="text-gray-300">{pro}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+  
+          {/* Cons Card */}
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-red-500" />
+                <h3 className="text-lg font-semibold">Cons</h3>
+              </div>
+              <button
+                onClick={() => setExpandedSection(expandedSection === 'cons' ? null : 'cons')}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <ChevronDown className={`w-5 h-5 transform transition-transform ${expandedSection === 'cons' ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              {categoryAnalysis.cons.map((con, index) => (
+                <div
+                  key={index}
+                  className="p-3 bg-red-500/5 rounded-lg border border-red-500/10 hover:bg-red-500/10 transition-colors"
+                >
+                  <p className="text-gray-300">{con}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+  
+        {/* Sentimental Categories Card */}
+        <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+          <div className="flex items-center gap-2 mb-4">
+            <Tag className="w-5 h-5 text-blue-400" />
+            <h3 className="text-lg font-semibold">Sentimental Categories</h3>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {categoryAnalysis.sentimental_categories.map((category, index) => (
+              <span
+                key={index}
+                className="px-3 py-1 bg-blue-500/10 text-blue-400 rounded-full text-sm border border-blue-500/20"
+              >
+                {category.replace(/_/g, ' ')}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  // Emotional Distribution Component
+  // const EmotionalDistribution = () => (
+  //   <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 mb-8">
+  //     <h2 className="text-xl font-semibold mb-4">Emotional Distribution</h2>
+  //     <div className="h-64">
+  //       <ResponsiveContainer width="100%" height="100%">
+  //         <PieChart>
+  //           <Pie
+  //             data={emotionalChartData}
+  //             dataKey="value"
+  //             nameKey="emotion"
+  //             cx="50%"
+  //             cy="50%"
+  //             outerRadius={80}
+  //             label
+  //           >
+  //             {emotionalChartData.map((entry, index) => (
+  //               <Cell key={`cell-${index}`} fill={entry.color} />
+  //             ))}
+  //           </Pie>
+  //           <Tooltip
+  //             contentStyle={{
+  //               backgroundColor: 'rgba(0,0,0,0.8)',
+  //               border: '1px solid rgba(255,255,255,0.1)',
+  //               borderRadius: '8px'
+  //             }}
+  //             formatter={(value: number) => [`${value.toFixed(1)}%`, 'Percentage']}
+  //           />
+  //           <Legend />
+  //         </PieChart>
+  //       </ResponsiveContainer>
+  //     </div>
+  //   </div>
+  // );
+  const fetchCategoryDetails = useCallback(async (emotion: string) => {
+    try {
+      const params = {
+        days: timeFilter,
+        platform: selectedPlatform !== 'all' ? selectedPlatform : undefined,
+      };
+      // Call the new backend endpoint /report/detail_categories
+      const response = await axios.get<DetailCategoryReport>(`${API_BASE_URL}/report/detail_categories`, { params });
+      const details = response.data.details;
+      // Find the detail object matching the clicked emotion
+      const found = details.find((d) => d.overall_sentiment_detail === emotion);
+      if (found) {
+        setCategoryDetails(found);
+        setSelectedEmotion(emotion);
+      } else {
+        setCategoryDetails(null);
+        setSelectedEmotion(null);
+      }
+    } catch (err) {
+      console.error("Error fetching category details", err);
+      setError("Failed to fetch category details");
+    }
+  }, [timeFilter, selectedPlatform]);
 
+  const handleEmotionClick = useCallback((emotion: string) => {
+    fetchCategoryDetails(emotion);
+  }, [fetchCategoryDetails]);
+
+
+  // Add this new component definition to replace the pie chart
+function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: OverallDetailReport; onEmotionClick: (emotion: string) => void }) {
+    return (
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold mb-4">Emotional Analysis</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Object.entries(emotionColors).map(([emotion, color]) => {
+            // Use 0 if the API doesn't return a value for that emotion
+            const value = emotionalData.overall_sentiment_detail[emotion] || 0;
+            return (
+              <div
+                key={emotion}
+                className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-all group cursor-pointer"
+                style={{ borderLeftColor: color, borderLeftWidth: '4px' }}
+                onClick={() => onEmotionClick(emotion)} // <-- new onClick handler
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <h3 className="text-sm font-medium capitalize text-gray-400">
+                    {emotion}
+                  </h3>
+                  <div
+                    className="w-3 h-3 rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <p className="text-2xl font-bold">{value.toFixed(1)}%</p>
+                  <div className="h-1 flex-1 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500 ease-out"
+                      style={{
+                        width: `${value}%`,
+                        backgroundColor: color,
+                        opacity: 0.5,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  
   const renderContent = () => {
-    switch (activeTab) {
-      case 'insights':
-        return (
+    return (
+      <>
+              {/* <EmotionalStats
+        emotionalData={emotionalData}
+        onEmotionClick={handleEmotionClick}
+      /> */}
+      {activeTab !== 'categories' && (
+        <>
+          <EmotionalStats
+            emotionalData={emotionalData}
+            onEmotionClick={handleEmotionClick}
+          />
+          <div className="space-y-4 mb-8">
+            <PlatformSelector />
+          </div>
+        </>
+      )}
+      {activeTab === 'categories' && (
+        <div className="space-y-6">
+          {/* Category Analysis Section goes here */}
+        </div>
+      )}
+
+
+      {/* Conditionally render the detail card if an emotion is selected */}
+      {categoryDetails && selectedEmotion && (
+    <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 mb-8">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">
+          Details for: {selectedEmotion}
+        </h3>
+        <button
+          onClick={() => {
+            setCategoryDetails(null);
+            setSelectedEmotion(null);
+          }}
+          className="text-gray-400 hover:text-white"
+        >
+          Close
+        </button>
+      </div>
+      {/* Categories */}
+      <div>
+        <h4 className="text-md font-medium mb-2">Categories:</h4>
+        {categoryDetails.categories.map((cat) => (
+          <p key={cat} className="text-sm text-gray-300">
+            {cat}
+          </p>
+        ))}
+      </div>
+      {/* Overall Sentimental Categories */}
+      {/* <div className="mt-4">
+        <h4 className="text-md font-medium mb-2">Overall Sentimental Categories:</h4>
+        {categoryDetails.overall_sentimental_categories.map((osc) => (
+          <p key={osc} className="text-sm text-gray-300">
+            {osc}
+          </p>
+        ))}
+      </div> */}
+      {/* NEW: Summary Section */}
+      <div className="mt-4">
+        <h4 className="text-md font-medium mb-2">Summary:</h4>
+        <p className="text-sm text-gray-300">
+          {categoryDetails.summary || "No summary available."}
+        </p>
+      </div>
+    </div>
+  )}
+
+{activeTab === 'categories' && (
+  <div className="space-y-6">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      {categories.map((category) => (
+        <button
+          key={category}
+          onClick={() => fetchCategoryAnalysis(category)}
+          className={`p-4 rounded-xl border transition-all ${
+            selectedCategory === category
+              ? 'bg-white/20 border-white/20 text-white'
+              : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-400 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <ListChecks className="w-5 h-5" />
+            <span>{category}</span>
+          </div>
+        </button>
+      ))}
+    </div>
+    {selectedCategory && <CategoryAnalysisSection />}
+  </div>
+)}
+
+{activeTab === 'overview' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            {/* Sentiment Trends */}
+            <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 h-80">
+              <h2 className="text-xl font-semibold mb-4">Sentiment Trends</h2>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                  <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" />
+                  <YAxis stroke="rgba(255,255,255,0.5)" />
+                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }} />
+                  <Legend />
+                  <Line type="monotone" dataKey="positive" stroke="#10B981" strokeWidth={2} dot={false} name="Positive" />
+                  <Line type="monotone" dataKey="negative" stroke="#EF4444" strokeWidth={2} dot={false} name="Negative" />
+                  <Line type="monotone" dataKey="neutral" stroke="#6B7280" strokeWidth={2} dot={false} name="Neutral" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+            {/* Feedback and Issues */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold">Top Positive Feedback</h2>
+                  <button
+                    onClick={() => setShowAllPositive(!showAllPositive)}
+                    className="text-sm text-gray-400 hover:text-white flex items-center gap-1"
+                  >
+                    {showAllPositive ? 'Show Less' : 'View More'}
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {positiveFeedback.map((item, index) => (
+                    <div key={index} className="p-3 bg-white/5 rounded-lg">
+                      <p className="text-gray-300">{item.category}</p>
+                      <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold">Critical Issues</h2>
+                  <button
+                    onClick={() => setShowAllNegative(!showAllNegative)}
+                    className="text-sm text-gray-400 hover:text-white flex items-center gap-1"
+                  >
+                    {showAllNegative ? 'Show Less' : 'View More'}
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {criticalIssues.map((item, index) => (
+                    <div key={index} className="p-3 bg-white/5 rounded-lg border-l-2 border-red-500">
+                      <p className="text-gray-300">{item.category}</p>
+                      <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
+                    </div>
+                    
+
+                    
+                  ))}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'insights' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
@@ -242,10 +810,9 @@ function App() {
               </div>
             </div>
           </div>
-        );
+        )}
 
-      case 'comparison':
-        return (
+        {activeTab === 'comparison' && (
           <div className="space-y-6">
             <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 h-96">
               <h2 className="text-xl font-semibold mb-4">Platform Comparison</h2>
@@ -269,10 +836,9 @@ function App() {
               </ResponsiveContainer>
             </div>
           </div>
-        );
+        )}
 
-      case 'alerts':
-        return (
+        {activeTab === 'alerts' && (
           <div className="space-y-6">
             <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
               <h2 className="text-xl font-semibold mb-4">Sentiment Trends Analysis</h2>
@@ -313,16 +879,11 @@ function App() {
                           fillOpacity={1}
                           fill="url(#positiveGradient)"
                         />
-                        {/* Average line */}
-                        <Line
-                          type="monotone"
-                          dataKey={() => {
-                            const avg = trendData.reduce((sum, item) => sum + item.positive, 0) / trendData.length;
-                            return avg;
-                          }}
+                        <ReferenceLine
+                          y={positiveAverage}
                           stroke="#10B981"
                           strokeDasharray="5 5"
-                          name="Average"
+                          label="Avg Positive"
                         />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -365,16 +926,11 @@ function App() {
                           fillOpacity={1}
                           fill="url(#negativeGradient)"
                         />
-                        {/* Average line */}
-                        <Line
-                          type="monotone"
-                          dataKey={() => {
-                            const avg = trendData.reduce((sum, item) => sum + item.negative, 0) / trendData.length;
-                            return avg;
-                          }}
+                        <ReferenceLine
+                          y={negativeAverage}
                           stroke="#EF4444"
                           strokeDasharray="5 5"
-                          name="Average"
+                          label="Avg Negative"
                         />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -383,121 +939,9 @@ function App() {
               </div>
             </div>
           </div>
-        );
-
-      default:
-        return (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              {/* Sentiment Distribution */}
-              <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 h-80">
-                <h2 className="text-xl font-semibold mb-4">Sentiment Distribution</h2>
-                <ResponsivePie
-                  data={pieChartData}
-                  margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
-                  innerRadius={0.6}
-                  padAngle={0.7}
-                  cornerRadius={3}
-                  activeOuterRadiusOffset={8}
-                  colors={{ datum: 'data.color' }}
-                  borderWidth={1}
-                  borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
-                  arcLinkLabelsSkipAngle={10}
-                  arcLinkLabelsTextColor="rgba(255,255,255,0.8)"
-                  arcLinkLabelsThickness={2}
-                  arcLinkLabelsColor={{ from: 'color' }}
-                  arcLabelsSkipAngle={10}
-                  arcLabelsTextColor="rgba(255,255,255,0.8)"
-                  theme={{
-                    background: 'transparent',
-                    textColor: 'rgba(255,255,255,0.8)',
-                    fontSize: 12,
-                    axis: {
-                      domain: {
-                        line: {
-                          stroke: 'rgba(255,255,255,0.1)',
-                        },
-                      },
-                    },
-                    grid: {
-                      line: {
-                        stroke: 'rgba(255,255,255,0.1)',
-                      },
-                    },
-                  }}
-                />
-              </div>
-
-              {/* Sentiment Trends */}
-              <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 h-80">
-                <h2 className="text-xl font-semibold mb-4">Sentiment Trends</h2>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trendData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" />
-                    <YAxis stroke="rgba(255,255,255,0.5)" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'rgba(0,0,0,0.8)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '8px'
-                      }}
-                    />
-                    <Legend />
-                    <Line type="monotone" dataKey="positive" stroke="#10B981" strokeWidth={2} dot={false} name="Positive" />
-                    <Line type="monotone" dataKey="negative" stroke="#EF4444" strokeWidth={2} dot={false} name="Negative" />
-                    <Line type="monotone" dataKey="neutral" stroke="#6B7280" strokeWidth={2} dot={false} name="Neutral" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Feedback and Issues */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-semibold">Top Positive Feedback</h2>
-                  <button
-                    onClick={() => setShowAllPositive(!showAllPositive)}
-                    className="text-sm text-gray-400 hover:text-white flex items-center gap-1"
-                  >
-                    {showAllPositive ? 'Show Less' : 'View More'}
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {positiveFeedback.map((item, index) => (
-                    <div key={index} className="p-3 bg-white/5 rounded-lg">
-                      <p className="text-gray-300">{item.category}</p>
-                      <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-semibold">Critical Issues</h2>
-                  <button
-                    onClick={() => setShowAllNegative(!showAllNegative)}
-                    className="text-sm text-gray-400 hover:text-white flex items-center gap-1"
-                  >
-                    {showAllNegative ? 'Show Less' : 'View More'}
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {criticalIssues.map((item, index) => (
-                    <div key={index} className="p-3 bg-white/5 rounded-lg border-l-2 border-red-500">
-                      <p className="text-gray-300">{item.category}</p>
-                      <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </>
-        );
-    }
+        )}
+      </>
+    );
   };
 
   return (
@@ -540,6 +984,15 @@ function App() {
           >
             <AlertTriangle className="w-6 h-6" />
           </button>
+
+          <button
+  onClick={() => setActiveTab('categories')}
+  className={`p-3 rounded-lg transition-all ${activeTab === 'categories' ? 'bg-white/10' : 'hover:bg-white/5'}`}
+  title="Categories"
+>
+  <FolderHeart className="w-6 h-6" />
+</button>
+
         </nav>
       </div>
 
@@ -547,32 +1000,15 @@ function App() {
       <div className="ml-20 p-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
-          Peak by Everest
+            Peak by Everest
           </h1>
           <p className="text-gray-400">Real-time customer feedback analysis</p>
         </header>
 
         {/* Filters */}
         <div className="space-y-4 mb-8">
-          <div className="flex items-center gap-4">
-            <Clock className="w-5 h-5 text-gray-400" />
-            <div className="flex gap-2">
-              {['7', '30', '60'].map((days) => (
-                <button
-                  key={days}
-                  onClick={() => setTimeFilter(days)}
-                  className={`px-3 py-1 rounded-lg transition-all ${
-                    timeFilter === days
-                      ? 'bg-white/20 text-white'
-                      : 'hover:bg-white/10 text-gray-400'
-                  }`}
-                >
-                  {days} days
-                </button>
-              ))}
-            </div>
-          </div>
           <PlatformSelector />
+          
         </div>
 
         {/* Stats Overview */}
@@ -599,7 +1035,7 @@ function App() {
               </div>
             </div>
           </div>
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white /10">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-gray-500/10 rounded-lg">
                 <Minus className="w-6 h-6 text-gray-500" />
@@ -611,6 +1047,12 @@ function App() {
             </div>
           </div>
         </div>
+
+        {activeTab === 'categories' && (
+        <h2 className="text-3xl font-bold text-white mb-4">
+          General Category Overview Analysis
+        </h2>
+      )}
 
         {/* Dynamic Content */}
         {loading ? (

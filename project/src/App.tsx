@@ -141,7 +141,7 @@ const [categories] = useState<string[]>([
 
 
 
-  const API_BASE_URL = 'http://127.0.0.1:8080';
+  const API_BASE_URL = 'https://everest-sentimental-dashboard-backend.onrender.com';
 
   const fetchCategoryAnalysis = useCallback(async (category: string) => {
     try {

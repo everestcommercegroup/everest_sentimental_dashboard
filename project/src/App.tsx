@@ -149,8 +149,7 @@ const [categories] = useState<string[]>([
   const fetchCategoryAnalysis = useCallback(async (category: string) => {
     try {
       const response = await axios.get(`${API_BASE_URL}/report/category_analysis`, {
-        params: { category, company: selectedCompany }  // <-- Add company here
-
+        params: { category, company: selectedCompany }
       });
       setCategoryAnalysis(response.data);
       setSelectedCategory(category);
@@ -158,7 +157,8 @@ const [categories] = useState<string[]>([
       console.error('Error fetching category analysis:', err);
       setError('Failed to fetch category analysis');
     }
-  }, [API_BASE_URL]);
+  }, [API_BASE_URL, selectedCompany]);
+  
   
 
   const processEmotionalData = useCallback((data: any): OverallDetailReport => {
@@ -259,7 +259,7 @@ const CompanySelector = () => (
       setError(null);
 
       const params = {
-        days: timeFilter,
+        // days: timeFilter,
         platform: selectedPlatform !== 'all' ? selectedPlatform : undefined,
         company: selectedCompany,  // <-- Add this
 
@@ -578,7 +578,7 @@ const CompanySelector = () => (
   const fetchCategoryDetails = useCallback(async (emotion: string) => {
     try {
       const params = {
-        days: timeFilter,
+        // days: timeFilter,
         platform: selectedPlatform !== 'all' ? selectedPlatform : undefined,
         company: selectedCompany, // will use the current selectedCompany
       };

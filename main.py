@@ -8,7 +8,7 @@ from pymongo.errors import PyMongoError
 from dotenv import load_dotenv
 import openai
 from bson.objectid import ObjectId
-from typing import List, Dict, Any
+from typing import List, Dict, Any,Optional
 
 # Load environment variables
 load_dotenv()
@@ -104,17 +104,25 @@ def common_match(platform: str = None, start_date: str = None, end_date: str = N
     return match
 
 # 1) Overall Sentiment Distribution (platform wise)
+
+
+app = FastAPI()
+
 @app.get("/report/overall_by_platform", response_model=OverallReport)
 def overall_by_platform(
     platform: str = Query(None),
-    days: int = Query(60),  # instead of start_date/end_date, we use days (default 30)
+    days: Optional[int] = Query(None),  # Optional; later you can update this to apply a date range.
     company: str = Query(None)
 ):
-    now = datetime.datetime.utcnow()
-    start = now - datetime.timedelta(days=days)
+    if days is not None:
+        now = datetime.datetime.utcnow()
+        start = now - datetime.timedelta(days=days)
+        start_str, end_str = start.isoformat(), now.isoformat()
+    else:
+        start_str, end_str = None, None  # No date filtering for overall analysis.
     
-    # Build the query filter using start and now as the time period along with company filter
-    base_match = common_match(platform, start.isoformat(), now.isoformat(), company)
+    # Build the query filter. Ensure common_match handles None values by skipping date filters.
+    base_match = common_match(platform, start_str, end_str, company)
     base_match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
     
     total = reviews_collection.count_documents(base_match)
@@ -129,7 +137,7 @@ def overall_by_platform(
     overall = {doc["_id"]: round((doc["count"] / total) * 100, 2) for doc in results}
     
     latest_doc = reviews_collection.find_one(base_match, sort=[("time_period", -1)])
-    last_updated = latest_doc.get("time_period", now)
+    last_updated = latest_doc.get("time_period", datetime.datetime.utcnow())
     
     return OverallReport(
         overall_sentiment=overall,
@@ -137,18 +145,25 @@ def overall_by_platform(
         last_updated=last_updated
     )
 
+
 # 2) Line chart for overall sentiment trends (monthly aggregation)
+from typing import Optional
+
 @app.get("/report/trends", response_model=TrendReport)
 def report_trends(
     platform: str = Query(None),
-    days: int = Query(60),  # default 60 days
+    days: Optional[int] = Query(None),  # Optional; if not provided, overall data is returned.
     company: str = Query(None)
 ):
     try:
-        now = datetime.datetime.utcnow()
-        start = now - datetime.timedelta(days=days)
+        if days is not None:
+            now = datetime.datetime.utcnow()
+            start = now - datetime.timedelta(days=days)
+            start_str, end_str = start.isoformat(), now.isoformat()
+        else:
+            start_str, end_str = None, None  # Overall data (no date filtering)
         
-        match = common_match(platform, start.isoformat(), now.isoformat(), company)
+        match = common_match(platform, start_str, end_str, company)
         match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
         
         pipeline = [
@@ -180,6 +195,7 @@ def report_trends(
         return TrendReport(trends=trends)
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # 3) Average negative trends and monthly spike analysis (platform & overall)
 @app.get("/report/negative_trends", response_model=NegativeTrendReport)

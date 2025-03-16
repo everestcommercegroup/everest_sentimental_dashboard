@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import openai
 from bson.objectid import ObjectId
 from typing import List, Dict, Any,Optional
-
+import datetime
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
@@ -34,10 +34,11 @@ reviews_collection = db["sentimental_analysis"]
 
 # --- Pydantic Models ---
 class OverallReport(BaseModel):
-    overall_sentiment: Dict[str, float]  # percentages
+    overall_sentiment: dict       # stores percentages { "positive": 80.4, ... }
     total_reviews: int
     last_updated: datetime.datetime
-    sentiment_counts: Dict[str, int] = {}  # NEW: store raw counts
+    sentiment_counts: Dict[str, int] = {}  # NEW: store raw counts { "positive": 120, ... }
+
 
 class DetailedReport(BaseModel):
     overall_sentiment: dict
@@ -128,9 +129,10 @@ def overall_by_platform(
         raise HTTPException(status_code=404, detail="No review data found")
     
     pipeline = [
-        {"$match": base_match},
+        {"$match": {**base_match, "overall_sentiment": {"$ne": ""}}},
         {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
     ]
+
     results = list(reviews_collection.aggregate(pipeline))
     
     overall_sentiment = {
@@ -276,7 +278,7 @@ def pros_cons(
             "No extra text, just a clear list of pros and cons with dashes."
         )
 
-        response = openai.ChatCompletion.create(
+        response = openai.chat.completions.create(
             model="gpt-4o",  # or your chosen model
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,

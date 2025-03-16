@@ -30,6 +30,14 @@ interface OverallReport {
     negative: number;
     neutral: number;
   };
+
+  sentiment_counts: {
+    positive: number;
+    negative: number;
+    neutral: number;
+    [key: string]: number; // in case there are other sentiments
+  };
+
   total_reviews: number;
   last_updated: string;
 }
@@ -106,6 +114,8 @@ function App() {
   const [timeFilter, setTimeFilter] = useState('30');
   const [overallData, setOverallData] = useState<OverallReport>({
     overall_sentiment: { positive: 0, negative: 0, neutral: 0 },
+    sentiment_counts: { positive: 0, negative: 0, neutral: 0 },
+
     total_reviews: 0,
     last_updated: new Date().toISOString()
   });
@@ -296,7 +306,12 @@ const CompanySelector = () => (
           .catch(() => ({ data: { alerts: [] } }))
       ]);
 
-      setOverallData(processOverallData(overallRes.data));
+    setOverallData({
+      overall_sentiment: overallRes.data?.overall_sentiment || { positive: 0, negative: 0, neutral: 0 },
+      sentiment_counts: overallRes.data?.sentiment_counts || { positive: 0, negative: 0, neutral: 0 },
+      total_reviews: overallRes.data?.total_reviews || 0,
+      last_updated: overallRes.data?.last_updated || new Date().toISOString()
+    });
       setEmotionalData(processEmotionalData(emotionalRes.data));
       setTrendData(processTrendData(trendRes.data?.trends));
       setPositiveFeedback(processFeedbackData(positiveRes.data?.table));
@@ -1061,6 +1076,9 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
               <div>
                 <h3 className="text-sm text-gray-400">Positive</h3>
                 <p className="text-2xl font-bold">{overallData.overall_sentiment.positive.toFixed(1)}%</p>
+                <p className="text-sm text-gray-500">
+        {overallData.sentiment_counts.positive} reviews
+      </p>
               </div>
             </div>
           </div>
@@ -1072,6 +1090,9 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
               <div>
                 <h3 className="text-sm text-gray-400">Negative</h3>
                 <p className="text-2xl font-bold">{overallData.overall_sentiment.negative.toFixed(1)}%</p>
+                <p className="text-sm text-gray-500">
+        {overallData.sentiment_counts.negative} reviews
+      </p>
               </div>
             </div>
           </div>
@@ -1083,6 +1104,9 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
               <div>
                 <h3 className="text-sm text-gray-400">Neutral</h3>
                 <p className="text-2xl font-bold">{overallData.overall_sentiment.neutral.toFixed(1)}%</p>
+                <p className="text-sm text-gray-500">
+        {overallData.sentiment_counts.neutral} reviews
+      </p>
               </div>
             </div>
           </div>

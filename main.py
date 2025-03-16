@@ -34,9 +34,10 @@ reviews_collection = db["sentimental_analysis"]
 
 # --- Pydantic Models ---
 class OverallReport(BaseModel):
-    overall_sentiment: dict
+    overall_sentiment: Dict[str, float]  # percentages
     total_reviews: int
     last_updated: datetime.datetime
+    sentiment_counts: Dict[str, int] = {}  # NEW: store raw counts
 
 class DetailedReport(BaseModel):
     overall_sentiment: dict
@@ -120,9 +121,7 @@ def overall_by_platform(
     else:
         start_str, end_str = None, None  # No date filtering for overall analysis.
     
-    # Build the query filter. Ensure common_match handles None values by skipping date filters.
     base_match = common_match(platform, start_str, end_str, company)
-    base_match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
     
     total = reviews_collection.count_documents(base_match)
     if total == 0:
@@ -133,16 +132,25 @@ def overall_by_platform(
         {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
     ]
     results = list(reviews_collection.aggregate(pipeline))
-    overall = {doc["_id"]: round((doc["count"] / total) * 100, 2) for doc in results}
     
+    overall_sentiment = {
+        doc["_id"]: round((doc["count"] / total) * 100, 2)
+        for doc in results
+    }
+    sentiment_counts = {
+        doc["_id"]: doc["count"]
+        for doc in results
+    }
+
     latest_doc = reviews_collection.find_one(base_match, sort=[("time_period", -1)])
     last_updated = latest_doc.get("time_period", datetime.datetime.utcnow())
-    
-    return OverallReport(
-        overall_sentiment=overall,
-        total_reviews=total,
-        last_updated=last_updated
-    )
+
+    return {
+        "overall_sentiment": overall_sentiment,    # e.g. { "positive": 80.4, ... }
+        "total_reviews": total,
+        "last_updated": last_updated,
+        "sentiment_counts": sentiment_counts       # e.g. { "positive": 250, ... }
+    }
 
 
 # 2) Line chart for overall sentiment trends (monthly aggregation)

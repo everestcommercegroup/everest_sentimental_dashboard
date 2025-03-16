@@ -26,13 +26,19 @@ import { safeNumber, safeString, createSafeObject, createPieData } from './utils
 // Types
 interface OverallReport {
   overall_sentiment: {
-    positive: number;
+    positive: number;  // percentage
     negative: number;
     neutral: number;
   };
   total_reviews: number;
   last_updated: string;
+  sentiment_counts: {
+    positive: number;  // raw count
+    negative: number;
+    neutral: number;
+  };
 }
+
 
 interface OverallDetailReport {
   overall_sentiment_detail: {
@@ -177,26 +183,32 @@ const [categories] = useState<string[]>([
     };
   }, []);
 
-  const processOverallData = useCallback((data: unknown): OverallReport => {
+  const processOverallData = useCallback((data: any): OverallReport => {
     const defaultData: OverallReport = {
       overall_sentiment: { positive: 0, negative: 0, neutral: 0 },
       total_reviews: 0,
-      last_updated: new Date().toISOString()
+      last_updated: new Date().toISOString(),
+      sentiment_counts: { positive: 0, negative: 0, neutral: 0 }
     };
-
+  
     if (!data || typeof data !== 'object') return defaultData;
-
-    const safeData = data as any;
+  
     return {
       overall_sentiment: {
-        positive: safeNumber(safeData?.overall_sentiment?.positive),
-        negative: safeNumber(safeData?.overall_sentiment?.negative),
-        neutral: safeNumber(safeData?.overall_sentiment?.neutral)
+        positive: safeNumber(data?.overall_sentiment?.positive),
+        negative: safeNumber(data?.overall_sentiment?.negative),
+        neutral: safeNumber(data?.overall_sentiment?.neutral)
       },
-      total_reviews: safeNumber(safeData?.total_reviews),
-      last_updated: safeString(safeData?.last_updated) || defaultData.last_updated
+      total_reviews: safeNumber(data?.total_reviews),
+      last_updated: safeString(data?.last_updated) || defaultData.last_updated,
+      sentiment_counts: {
+        positive: safeNumber(data?.sentiment_counts?.positive),
+        negative: safeNumber(data?.sentiment_counts?.negative),
+        neutral: safeNumber(data?.sentiment_counts?.neutral)
+      }
     };
   }, []);
+  
 
   const processFeedbackData = useCallback((data: unknown): TopFeedback[] => {
     if (!Array.isArray(data)) return [];
@@ -1053,40 +1065,62 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
 
         {/* Stats Overview */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-green-500/10 rounded-lg">
-                <ThumbsUp className="w-6 h-6 text-green-500" />
-              </div>
-              <div>
-                <h3 className="text-sm text-gray-400">Positive</h3>
-                <p className="text-2xl font-bold">{overallData.overall_sentiment.positive.toFixed(1)}%</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-red-500/10 rounded-lg">
-                <ThumbsDown className="w-6 h-6 text-red-500" />
-              </div>
-              <div>
-                <h3 className="text-sm text-gray-400">Negative</h3>
-                <p className="text-2xl font-bold">{overallData.overall_sentiment.negative.toFixed(1)}%</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white /10">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-gray-500/10 rounded-lg">
-                <Minus className="w-6 h-6 text-gray-500" />
-              </div>
-              <div>
-                <h3 className="text-sm text-gray-400">Neutral</h3>
-                <p className="text-2xl font-bold">{overallData.overall_sentiment.neutral.toFixed(1)}%</p>
-              </div>
-            </div>
-          </div>
-        </div>
+  {/* Positive */}
+  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+    <div className="flex items-center gap-4">
+      <div className="p-3 bg-green-500/10 rounded-lg">
+        <ThumbsUp className="w-6 h-6 text-green-500" />
+      </div>
+      <div>
+        <h3 className="text-sm text-gray-400">Positive</h3>
+        <p className="text-2xl font-bold">
+          {overallData.overall_sentiment.positive.toFixed(1)}%
+        </p>
+        {/* Show the raw count next to the percentage */}
+        <p className="text-sm text-gray-500">
+          {overallData.sentiment_counts.positive} reviews
+        </p>
+      </div>
+    </div>
+  </div>
+
+  {/* Negative */}
+  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+    <div className="flex items-center gap-4">
+      <div className="p-3 bg-red-500/10 rounded-lg">
+        <ThumbsDown className="w-6 h-6 text-red-500" />
+      </div>
+      <div>
+        <h3 className="text-sm text-gray-400">Negative</h3>
+        <p className="text-2xl font-bold">
+          {overallData.overall_sentiment.negative.toFixed(1)}%
+        </p>
+        <p className="text-sm text-gray-500">
+          {overallData.sentiment_counts.negative} reviews
+        </p>
+      </div>
+    </div>
+  </div>
+
+  {/* Neutral */}
+  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+    <div className="flex items-center gap-4">
+      <div className="p-3 bg-gray-500/10 rounded-lg">
+        <Minus className="w-6 h-6 text-gray-500" />
+      </div>
+      <div>
+        <h3 className="text-sm text-gray-400">Neutral</h3>
+        <p className="text-2xl font-bold">
+          {overallData.overall_sentiment.neutral.toFixed(1)}%
+        </p>
+        <p className="text-sm text-gray-500">
+          {overallData.sentiment_counts.neutral} reviews
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
 
         {activeTab === 'categories' && (
         <h2 className="text-3xl font-bold text-white mb-4">

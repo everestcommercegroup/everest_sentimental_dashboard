@@ -106,7 +106,6 @@ def common_match(platform: str = None, start_date: str = None, end_date: str = N
 # 1) Overall Sentiment Distribution (platform wise)
 
 
-app = FastAPI()
 
 @app.get("/report/overall_by_platform", response_model=OverallReport)
 def overall_by_platform(

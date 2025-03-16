@@ -96,6 +96,9 @@ const emotionColors: { [key: string]: string } = {
 
 function App() {
 
+
+  const [selectedCompany, setSelectedCompany] = useState<string>('cook_and_pan');
+
   const [selectedEmotion, setSelectedEmotion] = useState<string | null>(null);
   const [categoryDetails, setCategoryDetails] = useState<DetailCategory | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -146,7 +149,8 @@ const [categories] = useState<string[]>([
   const fetchCategoryAnalysis = useCallback(async (category: string) => {
     try {
       const response = await axios.get(`${API_BASE_URL}/report/category_analysis`, {
-        params: { category }
+        params: { category, company: selectedCompany }  // <-- Add company here
+
       });
       setCategoryAnalysis(response.data);
       setSelectedCategory(category);
@@ -225,6 +229,30 @@ const [categories] = useState<string[]>([
     })).filter(item => item.platform);
   }, []);
 
+  // CompanySelector Component
+  // Place this inside your App component, near other selector components:
+const CompanySelector = () => (
+  <div className="mb-6 flex items-center gap-4">
+    {[
+      { display: "Cook and Pan", value: "cook_and_pan" },
+      { display: "Cozy Heaven", value: "cozy_heaven" }
+    ].map((company) => (
+      <button
+        key={company.value}
+        onClick={() => setSelectedCompany(company.value)}
+        className={`px-3 py-1 rounded-lg transition-all ${
+          selectedCompany === company.value
+            ? 'bg-white/20 text-white'
+            : 'hover:bg-white/10 text-gray-400'
+        }`}
+      >
+        {company.display}
+      </button>
+    ))}
+  </div>
+);
+
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -257,7 +285,8 @@ const [categories] = useState<string[]>([
         axios.get(`${API_BASE_URL}/report/category_table`, {
           params: { ...params, sentiment: 'negative', limit: showAllNegative ? 10 : 3 }
         }).catch(() => ({ data: { table: [] } })),
-        axios.get(`${API_BASE_URL}/report/platform_comparison`)
+        axios.get(`${API_BASE_URL}/report/platform_comparison`, { params: { days: timeFilter, company: selectedCompany } })
+
           .catch(() => ({ data: { platforms: [] } })),
         axios.get(`${API_BASE_URL}/report/pros_cons`, { params })
           .catch(() => ({ data: { pros: [], cons: [] } })),
@@ -548,6 +577,7 @@ const [categories] = useState<string[]>([
       const params = {
         days: timeFilter,
         platform: selectedPlatform !== 'all' ? selectedPlatform : undefined,
+        company: selectedCompany,
       };
       // Call the new backend endpoint /report/detail_categories
       const response = await axios.get<DetailCategoryReport>(`${API_BASE_URL}/report/detail_categories`, { params });
@@ -998,7 +1028,8 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
 
       {/* Main Content */}
       <div className="ml-20 p-8">
-        <header className="mb-8">
+      <header className="mb-8 flex items-center justify-between">
+
           <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
             Peak by Everest
           </h1>
@@ -1007,6 +1038,8 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
 
         {/* Filters */}
         <div className="space-y-4 mb-8">
+        <CompanySelector />  
+
           <PlatformSelector />
           
         </div>

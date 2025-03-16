@@ -429,7 +429,7 @@ const CompanySelector = () => (
               </button>
             </div>
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="120%" height="100%">
                 <PieChart>
                   <Pie
                     data={sentimentData}
@@ -767,23 +767,25 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
 
 {activeTab === 'overview' && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            {/* Sentiment Trends */}
-            <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 h-80">
-              <h2 className="text-xl font-semibold mb-4">Sentiment Trends</h2>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                  <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" />
-                  <YAxis stroke="rgba(255,255,255,0.5)" />
-                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }} />
-                  <Legend />
-                  <Line type="monotone" dataKey="positive" stroke="#10B981" strokeWidth={2} dot={false} name="Positive" />
-                  <Line type="monotone" dataKey="negative" stroke="#EF4444" strokeWidth={2} dot={false} name="Negative" />
-                  <Line type="monotone" dataKey="neutral" stroke="#6B7280" strokeWidth={2} dot={false} name="Neutral" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+<div className="grid grid-cols-1 md:grid-cols-1 gap-6 mb-8">
+{/* Sentiment Trends */}
+<div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 h-96 w-full max-w-full">
+  <h2 className="text-xl font-semibold mb-4">Sentiment Trends</h2>
+  <ResponsiveContainer width="100%" height={350}>
+    <LineChart data={trendData} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
+      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+      <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" />
+      <YAxis stroke="rgba(255,255,255,0.5)" />
+      <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }} />
+      <Legend verticalAlign="bottom" align="center" wrapperStyle={{ paddingTop: '10px' }} />
+      <Line type="monotone" dataKey="positive" stroke="#10B981" strokeWidth={2} dot={false} name="Positive" />
+      <Line type="monotone" dataKey="negative" stroke="#EF4444" strokeWidth={2} dot={false} name="Negative" />
+      <Line type="monotone" dataKey="neutral" stroke="#6B7280" strokeWidth={2} dot={false} name="Neutral" />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
+
+
           </div>
 
             {/* Feedback and Issues */}
@@ -1066,51 +1068,69 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
           
         </div>
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-green-500/10 rounded-lg">
-                <ThumbsUp className="w-6 h-6 text-green-500" />
-              </div>
-              <div>
-                <h3 className="text-sm text-gray-400">Positive</h3>
-                <p className="text-2xl font-bold">{overallData.overall_sentiment.positive.toFixed(1)}%</p>
-                <p className="text-sm text-gray-500">
-        {overallData.sentiment_counts.positive} reviews
-      </p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-red-500/10 rounded-lg">
-                <ThumbsDown className="w-6 h-6 text-red-500" />
-              </div>
-              <div>
-                <h3 className="text-sm text-gray-400">Negative</h3>
-                <p className="text-2xl font-bold">{overallData.overall_sentiment.negative.toFixed(1)}%</p>
-                <p className="text-sm text-gray-500">
-        {overallData.sentiment_counts.negative} reviews
-      </p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white /10">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-gray-500/10 rounded-lg">
-                <Minus className="w-6 h-6 text-gray-500" />
-              </div>
-              <div>
-                <h3 className="text-sm text-gray-400">Neutral</h3>
-                <p className="text-2xl font-bold">{overallData.overall_sentiment.neutral.toFixed(1)}%</p>
-                <p className="text-sm text-gray-500">
-        {overallData.sentiment_counts.neutral} reviews
-      </p>
-              </div>
-            </div>
-          </div>
-        </div>
+{/* Stats Overview */}
+<div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+  {/* Positive Sentiment */}
+  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+    <div className="flex items-center gap-4">
+      <div className="p-3 bg-green-500/10 rounded-lg">
+        <ThumbsUp className="w-6 h-6 text-green-500" />
+      </div>
+      <div>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          Positive
+        </h3>
+        <p className="text-3xl font-extrabold text-white">
+          {overallData.overall_sentiment.positive.toFixed(1)}%
+        </p>
+        <p className="text-lg font-bold text-gray-300">
+          {overallData.sentiment_counts.positive.toLocaleString()} reviews
+        </p>
+      </div>
+    </div>
+  </div>
+
+  {/* Negative Sentiment */}
+  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+    <div className="flex items-center gap-4">
+      <div className="p-3 bg-red-500/10 rounded-lg">
+        <ThumbsDown className="w-6 h-6 text-red-500" />
+      </div>
+      <div>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          Negative
+        </h3>
+        <p className="text-3xl font-extrabold text-white">
+          {overallData.overall_sentiment.negative.toFixed(1)}%
+        </p>
+        <p className="text-lg font-bold text-gray-300">
+          {overallData.sentiment_counts.negative.toLocaleString()} reviews
+        </p>
+      </div>
+    </div>
+  </div>
+
+  {/* Neutral Sentiment */}
+  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+    <div className="flex items-center gap-4">
+      <div className="p-3 bg-gray-500/10 rounded-lg">
+        <Minus className="w-6 h-6 text-gray-500" />
+      </div>
+      <div>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          Neutral
+        </h3>
+        <p className="text-3xl font-extrabold text-white">
+          {overallData.overall_sentiment.neutral.toFixed(1)}%
+        </p>
+        <p className="text-lg font-bold text-gray-300">
+          {overallData.sentiment_counts.neutral.toLocaleString()} reviews
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
 
         {activeTab === 'categories' && (
         <h2 className="text-3xl font-bold text-white mb-4">

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from dotenv import load_dotenv
-import openai
+# import openai
 from bson.objectid import ObjectId
 from typing import List, Dict, Any,Optional
 
@@ -15,7 +15,7 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "ecommerce_sentiment")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_openai_api_key")
-openai.api_key = OPENAI_API_KEY
+# openai.api_key = OPENAI_API_KEY
 
 app = FastAPI(title="Customer Feedback Dashboard Backend")
 
@@ -128,9 +128,10 @@ def overall_by_platform(
         raise HTTPException(status_code=404, detail="No review data found")
     
     pipeline = [
-        {"$match": base_match},
-        {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
-    ]
+    {"$match": {**base_match, "overall_sentiment": {"$ne": ""}}},
+    {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
+]
+
     results = list(reviews_collection.aggregate(pipeline))
     
     overall_sentiment = {
@@ -760,28 +761,28 @@ def get_category_analysis(category: str, company: str = Query(None)):
     }
 
 # Chat endpoint remains the same
-@app.post("/chat")
-def chat_with_report(chat: ChatMessage, company: str = Query(None)):
-    try:
-        overall_report = overall_by_platform(platform=None, days=60, company=company)
-        context = "Overall sentiment: " + ", ".join([f"{k}: {v}%" for k, v in overall_report.overall_sentiment.items()])
-    except Exception:
-        context = "No report data available."
-    prompt = f"Report Context: {context}\nUser: {chat.message}\n"
-    if chat.history:
-        for h in chat.history:
-            prompt += f"{h.get('role')}: {h.get('content')}\n"
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=250
-        )
-        reply = response.choices[0].message.content.strip()
-        return {"session_id": chat.session_id, "reply": reply}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# @app.post("/chat")
+# def chat_with_report(chat: ChatMessage, company: str = Query(None)):
+#     try:
+#         overall_report = overall_by_platform(platform=None, days=60, company=company)
+#         context = "Overall sentiment: " + ", ".join([f"{k}: {v}%" for k, v in overall_report.overall_sentiment.items()])
+#     except Exception:
+#         context = "No report data available."
+#     prompt = f"Report Context: {context}\nUser: {chat.message}\n"
+#     if chat.history:
+#         for h in chat.history:
+#             prompt += f"{h.get('role')}: {h.get('content')}\n"
+#     try:
+#         response = openai.ChatCompletion.create(
+#             model="gpt-4o",
+#             messages=[{"role": "user", "content": prompt}],
+#             temperature=0.7,
+#             max_tokens=250
+#         )
+#         reply = response.choices[0].message.content.strip()
+#         return {"session_id": chat.session_id, "reply": reply}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

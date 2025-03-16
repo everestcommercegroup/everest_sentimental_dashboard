@@ -107,7 +107,7 @@ def common_match(platform: str = None, start_date: str = None, end_date: str = N
 @app.get("/report/overall_by_platform", response_model=OverallReport)
 def overall_by_platform(
     platform: str = Query(None),
-    days: int = Query(30),  # instead of start_date/end_date, we use days (default 30)
+    days: int = Query(60),  # instead of start_date/end_date, we use days (default 30)
     company: str = Query(None)
 ):
     now = datetime.datetime.utcnow()
@@ -141,7 +141,7 @@ def overall_by_platform(
 @app.get("/report/trends", response_model=TrendReport)
 def report_trends(
     platform: str = Query(None),
-    days: int = Query(30),  # default 30 days
+    days: int = Query(60),  # default 60 days
     company: str = Query(None)
 ):
     try:
@@ -406,7 +406,7 @@ class PlatformComparisonResponse(BaseModel):
 
 @app.get("/report/platform_comparison", response_model=PlatformComparisonResponse)
 def platform_comparison(
-    days: int = Query(30),
+    days: int = Query(60),
     company: str = Query(None)
 ):
     try:
@@ -501,7 +501,7 @@ class OverallDetailReport(BaseModel):
 @app.get("/report/overall_detail", response_model=OverallDetailReport)
 def overall_detail(
     platform: str = Query(None),
-    days: int = Query(30),
+    days: int = Query(60),
     company: str = Query(None)
 ):
     now = datetime.datetime.utcnow()
@@ -536,7 +536,7 @@ def overall_detail(
 @app.get("/report/category_sentiment_details")
 def category_sentiment_details(
     platform: str = Query(None),
-    days: int = Query(30),
+    days: int = Query(60),
     company: str = Query(None)
 ):
     now = datetime.datetime.utcnow()
@@ -740,7 +740,7 @@ def get_category_analysis(category: str, company: str = Query(None)):
 @app.post("/chat")
 def chat_with_report(chat: ChatMessage, company: str = Query(None)):
     try:
-        overall_report = overall_by_platform(platform=None, days=30, company=company)
+        overall_report = overall_by_platform(platform=None, days=60, company=company)
         context = "Overall sentiment: " + ", ".join([f"{k}: {v}%" for k, v in overall_report.overall_sentiment.items()])
     except Exception:
         context = "No report data available."

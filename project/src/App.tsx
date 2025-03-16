@@ -260,7 +260,9 @@ const CompanySelector = () => (
 
       const params = {
         days: timeFilter,
-        platform: selectedPlatform !== 'all' ? selectedPlatform : undefined
+        platform: selectedPlatform !== 'all' ? selectedPlatform : undefined,
+        company: selectedCompany,  // <-- Add this
+
       };
 
       const [
@@ -314,6 +316,7 @@ const CompanySelector = () => (
     selectedPlatform,
     showAllPositive,
     showAllNegative,
+    selectedCompany,
     processOverallData,
     processEmotionalData,
     processTrendData,
@@ -577,10 +580,12 @@ const CompanySelector = () => (
       const params = {
         days: timeFilter,
         platform: selectedPlatform !== 'all' ? selectedPlatform : undefined,
-        company: selectedCompany,
+        company: selectedCompany, // will use the current selectedCompany
       };
       // Call the new backend endpoint /report/detail_categories
       const response = await axios.get<DetailCategoryReport>(`${API_BASE_URL}/report/detail_categories`, { params });
+      console.log("detail_categories response:", response.data);
+  
       const details = response.data.details;
       // Find the detail object matching the clicked emotion
       const found = details.find((d) => d.overall_sentiment_detail === emotion);
@@ -595,7 +600,9 @@ const CompanySelector = () => (
       console.error("Error fetching category details", err);
       setError("Failed to fetch category details");
     }
-  }, [timeFilter, selectedPlatform]);
+  }, [timeFilter, selectedPlatform, selectedCompany]);
+  
+  
 
   const handleEmotionClick = useCallback((emotion: string) => {
     fetchCategoryDetails(emotion);

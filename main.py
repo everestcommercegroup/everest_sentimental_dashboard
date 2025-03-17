@@ -105,6 +105,17 @@ def common_match(platform: str = None, start_date: str = None, end_date: str = N
         match["time_period"] = time_filter
     return match
 
+def humanize_snake_case(value: str) -> str:
+    """
+    Convert snake_case text to capitalized words, e.g.
+    'missing_sheet_in_partial_delivery' -> 'Missing Sheet In Partial Delivery'.
+    """
+    # Replace underscores with spaces
+    spaced = value.replace("_", " ")
+    # Capitalize each word
+    return spaced.title()
+
+
 # 1) Overall Sentiment Distribution (platform wise)
 
 
@@ -204,6 +215,110 @@ def report_trends(
         return TrendReport(trends=trends)
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# 2.1 to get report monthly feedback
+from typing import List
+from pydantic import BaseModel
+
+class MonthlyFeedbackItem(BaseModel):
+    month: str
+    top_positive: List[dict]   # e.g. [ { "category": "XYZ", "count": 12 }, ... ]
+    top_negative: List[dict]
+
+class MonthlyFeedbackResponse(BaseModel):
+    data: List[MonthlyFeedbackItem]
+
+@app.get("/report/monthly_feedback", response_model=MonthlyFeedbackResponse)
+def monthly_feedback(
+    platform: Optional[str] = None,
+    days: Optional[int] = None,
+    company: Optional[str] = None
+):
+    # 1) Build time range if 'days' is given
+    if days is not None:
+        now = datetime.datetime.utcnow()
+        start = now - datetime.timedelta(days=days)
+        start_str, end_str = start.isoformat(), now.isoformat()
+    else:
+        start_str, end_str = None, None
+
+    # 2) Build a base match using your existing 'common_match' function
+    base_match = common_match(platform, start_str, end_str, company)
+    # We only care about positive/negative docs with a valid time_period
+    base_match["overall_sentiment"] = {"$in": ["positive", "negative"]}
+    base_match["time_period"] = {"$exists": True, "$ne": None}
+
+    # 3) Create the aggregation pipeline
+    pipeline = [
+        {"$match": base_match},
+        {
+            "$project": {
+                "year_month": {
+                    "$dateToString": {"format": "%Y-%m", "date": "$time_period"}
+                },
+                "category": "$overall_sentimental_category",
+                "sentiment": "$overall_sentiment"
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "month": "$year_month",
+                    "category": "$category",
+                    "sentiment": "$sentiment"
+                },
+                "count": {"$sum": 1}
+            }
+        },
+        {
+            "$group": {
+                "_id": "$_id.month",
+                "categoryData": {
+                    "$push": {
+                        "category": "$_id.category",
+                        "sentiment": "$_id.sentiment",
+                        "count": "$count"
+                    }
+                }
+            }
+        },
+        {"$sort": {"_id": 1}}
+    ]
+
+    # 4) Run the pipeline
+    results = list(reviews_collection.aggregate(pipeline))
+
+    # 5) Build the output structure
+    output = []
+    for doc in results:
+        month = doc["_id"]
+        category_data = doc["categoryData"]  # list of {category, sentiment, count}
+
+        # Separate positives & negatives
+        positives = [d for d in category_data if d["sentiment"] == "positive"]
+        negatives = [d for d in category_data if d["sentiment"] == "negative"]
+
+        # Sort descending by count and keep top 3 each
+        positives.sort(key=lambda x: x["count"], reverse=True)
+        negatives.sort(key=lambda x: x["count"], reverse=True)
+        top_pos = positives[:3]
+        top_neg = negatives[:3]
+
+        # Humanize snake_case categories
+        for item in top_pos:
+            item["category"] = humanize_snake_case(item["category"])
+        for item in top_neg:
+            item["category"] = humanize_snake_case(item["category"])
+
+        output.append({
+            "month": month,          # e.g. "2025-03"
+            "top_positive": top_pos, # e.g. [{"category": "Price Dissatisfaction", "sentiment": "positive", "count": 3}, ...]
+            "top_negative": top_neg
+        })
+
+    # 6) Return the final data
+    return {"data": output}
 
 
 # 3) Average negative trends and monthly spike analysis (platform & overall)
@@ -330,6 +445,7 @@ def category_table(
         match["overall_sentimental_category"] = {"$ne": ""}
         if sentiment:
             match["overall_sentiment"] = sentiment
+        
         pipeline = [
             {"$match": match},
             {"$group": {"_id": "$overall_sentimental_category", "count": {"$sum": 1}}},
@@ -337,10 +453,25 @@ def category_table(
             {"$limit": limit}
         ]
         results = list(reviews_collection.aggregate(pipeline))
-        table = [{"category": doc["_id"], "count": doc["count"]} for doc in results]
+
+        # Here we transform snake_case -> human-friendly
+        table = []
+        for doc in results:
+            raw_category = doc["_id"]  # e.g. "damaged_gas_solution"
+            count = doc["count"]
+            
+            # Convert to "Damaged Gas Solution"
+            human_category = humanize_snake_case(raw_category)
+
+            table.append({
+                "category": human_category,
+                "count": count
+            })
+
         return {"table": table}
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # 6) Filter control for time period for overall sentiment, detail, and category
 @app.get("/report/detailed", response_model=DetailedReport)

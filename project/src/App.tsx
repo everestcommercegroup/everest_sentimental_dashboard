@@ -42,6 +42,24 @@ interface OverallReport {
   last_updated: string;
 }
 
+interface MonthlyFeedbackItem {
+  month: string;
+  top_positive: Array<{
+    category: string;
+    sentiment: string; // e.g. "positive"
+    count: number;
+  }>;
+  top_negative: Array<{
+    category: string;
+    sentiment: string; // e.g. "negative"
+    count: number;
+  }>;
+}
+
+interface MonthlyFeedbackResponse {
+  data: MonthlyFeedbackItem[];
+}
+
 interface OverallDetailReport {
   overall_sentiment_detail: {
     [key: string]: number;
@@ -106,6 +124,7 @@ function App() {
 
 
   const [selectedCompany, setSelectedCompany] = useState<string>('cook_and_pan');
+  const [monthlyFeedback, setMonthlyFeedback] = useState<MonthlyFeedbackItem[]>([]);
 
   const [selectedEmotion, setSelectedEmotion] = useState<string | null>(null);
   const [categoryDetails, setCategoryDetails] = useState<DetailCategory | null>(null);
@@ -155,6 +174,7 @@ const [categories] = useState<string[]>([
 
 
   const API_BASE_URL = 'https://everest-sentimental-dashboard-backend.onrender.com';
+  // const API_BASE_URL = "http://127.0.0.1:8080"
 
   const fetchCategoryAnalysis = useCallback(async (category: string) => {
     try {
@@ -283,7 +303,8 @@ const CompanySelector = () => (
         negativeRes,
         comparisonRes,
         prosConsRes,
-        riskAlertsRes
+        riskAlertsRes,
+        monthlyFeedbackRes 
       ] = await Promise.all([
         axios.get(`${API_BASE_URL}/report/overall_by_platform`, { params })
           .catch(() => ({ data: null })),
@@ -303,7 +324,9 @@ const CompanySelector = () => (
         axios.get(`${API_BASE_URL}/report/pros_cons`, { params })
           .catch(() => ({ data: { pros: [], cons: [] } })),
         axios.get(`${API_BASE_URL}/report/risk_alerts`, { params })
-          .catch(() => ({ data: { alerts: [] } }))
+          .catch(() => ({ data: { alerts: [] } })),
+        axios.get(`${API_BASE_URL}/report/monthly_feedback`, { params }) // new
+
       ]);
 
     setOverallData({
@@ -319,6 +342,8 @@ const CompanySelector = () => (
       setComparisonData(processComparisonData(comparisonRes.data?.platforms));
       setProsCons(createSafeObject(prosConsRes.data, { pros: [], cons: [] }));
       setRiskAlerts(riskAlertsRes.data?.alerts || []);
+      setMonthlyFeedback(monthlyFeedbackRes.data.data || []);
+
 
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -670,25 +695,218 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
     );
   }
 
+  // Example: a new block or tab
+// function MonthlyFeedback({ monthlyFeedback }: MonthlyFeedbackProps) {
+//     // If no data, show a placeholder
+//     if (!monthlyFeedback.length) {
+//       return <p className="text-gray-400">No monthly feedback data</p>;
+//     }
   
+//     return (
+//       <div className="space-y-6">
+//         <h2 className="text-xl font-semibold text-white mb-4">
+//           Monthly Top 3 Strengths &amp; Critical Feedback
+//         </h2>
+  
+//         {monthlyFeedback.map((item) => (
+//           <div
+//             key={item.month}
+//             className="bg-white/5 p-4 rounded-md border border-white/10 mb-4"
+//           >
+//             <h3 className="text-lg font-bold text-white mb-4">
+//               {item.month}
+//             </h3>
+  
+//             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+//               {/* Top Positive Categories */}
+//               <div>
+//                 <h4 className="text-md font-semibold text-green-400 mb-2">
+//                   Top Positive
+//                 </h4>
+//                 {item.top_positive.length > 0 ? (
+//                   item.top_positive.map((pos, i) => (
+//                     <div
+//                       key={i}
+//                       className="p-3 mb-2 bg-green-500/5 rounded-lg border border-green-500/10"
+//                     >
+//                       <p className="text-lg text-gray-200 font-semibold">
+//                         {pos.category}
+//                         <span className="ml-2 text-sm text-gray-400">
+//                           ({pos.count} mentions)
+//                         </span>
+//                       </p>
+//                     </div>
+//                   ))
+//                 ) : (
+//                   <p className="text-gray-400 text-sm">No positive feedback.</p>
+//                 )}
+//               </div>
+  
+//               {/* Top Negative Categories */}
+//               <div>
+//                 <h4 className="text-md font-semibold text-red-400 mb-2">
+//                   Top Negative
+//                 </h4>
+//                 {item.top_negative.length > 0 ? (
+//                   item.top_negative.map((neg, i) => (
+//                     <div
+//                       key={i}
+//                       className="p-3 mb-2 bg-red-500/5 rounded-lg border border-red-500/10"
+//                     >
+//                       <p className="text-lg text-gray-200 font-semibold">
+//                         {neg.category}
+//                         <span className="ml-2 text-sm text-gray-400">
+//                           ({neg.count} mentions)
+//                         </span>
+//                       </p>
+//                     </div>
+//                   ))
+//                 ) : (
+//                   <p className="text-gray-400 text-sm">No negative feedback.</p>
+//                 )}
+//               </div>
+//             </div>
+//           </div>
+//         ))}
+//       </div>
+//     );
+//   }
+
+interface FeedbackItem {
+  category: string;
+  sentiment: string; // "positive" or "negative"
+  count: number;
+}
+interface MonthlyFeedbackItem {
+  month: string; // e.g. "2023-01"
+  top_positive: FeedbackItem[];
+  top_negative: FeedbackItem[];
+}
+
+interface Props {
+  data: MonthlyFeedbackItem[];
+}
+
+interface MonthlyFeedbackProps {
+  monthlyFeedback: MonthlyFeedbackItem[];
+}
+
+function MonthlyFeedbackCards({ data }: Props) {
+  // Sort data descending so newest month is first
+  const sortedData = [...data].sort((a, b) => b.month.localeCompare(a.month));
+
+  // Show only last 12 months by default
+  const [showAll, setShowAll] = useState(false);
+  const displayedData = showAll ? sortedData : sortedData.slice(0, 12);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-white mb-6">
+        Monthly Top 3 Strengths & Critical Feedback
+      </h2>
+
+      {displayedData.map((item) => (
+        <div
+          key={item.month}
+          className="bg-white/5 p-6 rounded-lg border border-white/10"
+        >
+          <h3 className="text-2xl font-bold text-white mb-4">{item.month}</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Top Positive Categories */}
+            <div>
+              <h4 className="text-xl font-semibold text-green-400 mb-3">
+                Top 3 Strengths
+              </h4>
+              {item.top_positive.length > 0 ? (
+                item.top_positive.map((pos, i) => (
+                  <div
+                    key={i}
+                    className="p-4 mb-3 bg-green-500/5 rounded-lg border border-green-500/10"
+                  >
+                    <p className="text-2xl text-white font-bold">
+                      {pos.category}
+                      <span className="ml-3 text-lg text-gray-300">
+                      ({pos.count} mentions)
+                      </span>
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-lg text-gray-400">
+                  No positive feedback.
+                </p>
+              )}
+            </div>
+            {/* Top Negative Categories */}
+            <div>
+              <h4 className="text-xl font-semibold text-red-400 mb-3">
+                Top 3 Critical Feedback
+              </h4>
+              {item.top_negative.length > 0 ? (
+                item.top_negative.map((neg, i) => (
+                  <div
+                    key={i}
+                    className="p-4 mb-3 bg-red-500/5 rounded-lg border border-red-500/10"
+                  >
+                    <p className="text-2xl text-white font-bold">
+                      {neg.category}
+                      <span className="ml-3 text-lg text-gray-300">
+                      ({neg.count} mentions)
+                      </span>
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-lg text-gray-400">
+                  No negative feedback.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {sortedData.length > 12 && (
+        <div className="text-center">
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="px-4 py-2 bg-white/10 rounded-lg text-gray-300 hover:bg-white/20 transition"
+          >
+            {showAll ? "Show Fewer Months" : "Show Older Months"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
   const renderContent = () => {
     return (
       <>
+{activeTab === 'monthlyFeedback' && (
+  <MonthlyFeedbackCards data={monthlyFeedback} />
+)}
+
+
+
+      
               {/* <EmotionalStats
         emotionalData={emotionalData}
         onEmotionClick={handleEmotionClick}
       /> */}
-      {activeTab !== 'categories' && (
-        <>
-          <EmotionalStats
-            emotionalData={emotionalData}
-            onEmotionClick={handleEmotionClick}
-          />
-          <div className="space-y-4 mb-8">
-            <PlatformSelector />
-          </div>
-        </>
-      )}
+      
+      {(activeTab !== 'categories' && activeTab !== 'monthlyFeedback') && (
+  <>
+    <EmotionalStats
+      emotionalData={emotionalData}
+      onEmotionClick={handleEmotionClick}
+    />
+    <div className="space-y-4 mb-8">
+      <PlatformSelector />
+    </div>
+  </>
+)}
+
       {activeTab === 'categories' && (
         <div className="space-y-6">
           {/* Category Analysis Section goes here */}
@@ -1046,6 +1264,16 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
 >
   <FolderHeart className="w-6 h-6" />
 </button>
+
+<button
+  onClick={() => setActiveTab('monthlyFeedback')}
+  className={`p-3 rounded-lg transition-all ${
+    activeTab === 'monthlyFeedback' ? 'bg-white/10' : 'hover:bg-white/5'
+  }`}
+>
+  <ListChecks className="w-6 h-6" />
+</button>
+
 
         </nav>
       </div>

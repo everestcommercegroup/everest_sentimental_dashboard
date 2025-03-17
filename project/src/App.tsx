@@ -165,6 +165,9 @@ function App() {
 
   const [selectedCompany, setSelectedCompany] = useState<string>('cook_and_pan');
   const [monthlyFeedback, setMonthlyFeedback] = useState<MonthlyFeedbackItem[]>([]);
+  // Some new useState lines near your other states:
+  const [selectedIssueReviews, setSelectedIssueReviews] = useState<any[]>([]);
+  const [issueModalOpen, setIssueModalOpen] = useState(false);
 
   const [selectedEmotion, setSelectedEmotion] = useState<string | null>(null);
   const [categoryDetails, setCategoryDetails] = useState<DetailCategory | null>(null);
@@ -751,6 +754,33 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
     );
   }
 
+  function handleIssueClick(categoryName: string, sentiment: string) {
+    axios.get(`${API_BASE_URL}/report/issue_details`, {
+      params: { category: categoryName, sentiment: sentiment, company: selectedCompany }
+    })
+    .then(response => {
+      setSelectedIssueReviews(response.data.reviews || []);
+      setIssueModalOpen(true);
+    })
+    .catch(error => {
+      console.error("Failed to fetch issue details", error);
+    });
+  }
+  
+  
+  
+  // In your render:
+  {criticalIssues.map((item, index) => (
+    <button
+      key={index}
+      onClick={() => handleIssueClick(item.category)}
+      className="p-3 bg-white/5 rounded-lg text-left w-full hover:bg-white/10 transition"
+    >
+      <p className="text-gray-300">{item.category}</p>
+      <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
+    </button>
+  ))}
+  
   // Example: a new block or tab
 // function MonthlyFeedback({ monthlyFeedback }: MonthlyFeedbackProps) {
 //     // If no data, show a placeholder
@@ -939,6 +969,42 @@ function MonthlyFeedbackCards({ data }: Props) {
   const renderContent = () => {
     return (
       <>
+      {issueModalOpen && (
+  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div className="bg-gray-900 p-6 rounded-lg max-w-2xl w-full border border-white/10">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold text-white">Issue Details</h2>
+        <button
+          className="text-gray-400 hover:text-white"
+          onClick={() => setIssueModalOpen(false)}
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="space-y-4 max-h-96 overflow-auto">
+        {selectedIssueReviews.map((rev) => (
+          <div key={rev._id} className="p-4 bg-white/5 rounded-lg border border-white/10">
+            <p className="text-sm text-gray-300 mb-1">
+              <span className="font-semibold text-white">Created:</span>{" "}
+              {rev.time_period}
+            </p>
+            <p className="text-sm text-gray-300 mb-1">
+              <span className="font-semibold text-white">AI Summary:</span>{" "}
+              {rev.overall_summary}
+            </p>
+            <p className="text-sm text-gray-300 mb-1">
+              <span className="font-semibold text-white">Sentiment Detail:</span>{" "}
+              {rev.overall_sentiment_detail}
+            </p>
+            {/* Add more fields as needed */}
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+)}
+
 {activeTab === 'monthlyFeedback' && (
   <MonthlyFeedbackCards data={monthlyFeedback} />
 )}
@@ -1076,14 +1142,23 @@ function MonthlyFeedbackCards({ data }: Props) {
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="space-y-3">
-                  {positiveFeedback.map((item, index) => (
-                    <div key={index} className="p-3 bg-white/5 rounded-lg">
-                      <p className="text-gray-300">{item.category}</p>
-                      <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
-                    </div>
-                  ))}
-                </div>
+{/* Top Positive Feedback */}
+{/* Top Positive Feedback */}
+<div className="space-y-3">
+{positiveFeedback.map((item, index) => (
+  <button
+    key={index}
+    onClick={() => handleIssueClick(item.category, "positive")}
+    className="p-3 bg-white/5 rounded-lg text-left w-full hover:bg-white/10 transition"
+  >
+    <p className="text-gray-300">{item.category}</p>
+    <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
+  </button>
+))}
+
+</div>
+
+
               </div>
               <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
                 <div className="flex justify-between items-center mb-4">
@@ -1096,17 +1171,24 @@ function MonthlyFeedbackCards({ data }: Props) {
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="space-y-3">
-                  {criticalIssues.map((item, index) => (
-                    <div key={index} className="p-3 bg-white/5 rounded-lg border-l-2 border-red-500">
-                      <p className="text-gray-300">{item.category}</p>
-                      <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
-                    </div>
-                    
+               {/* Critical Issues */}
+<div className="space-y-3">
+{criticalIssues.map((item, index) => (
+  <button
+    key={index}
+    onClick={() => handleIssueClick(item.category, "negative")}
+    className="p-3 bg-white/5 rounded-lg border-l-2 border-red-500 text-left w-full hover:bg-white/10 transition"
+  >
+    <p className="text-gray-300">{item.category}</p>
+    <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
+  </button>
+))}
+
+</div>
 
                     
-                  ))}
-                </div>
+
+
               </div>
             </div>
           </>
@@ -1281,55 +1363,66 @@ function MonthlyFeedbackCards({ data }: Props) {
           <CircleSlash className="w-6 h-6" />
         </div>
         <nav className="flex flex-col gap-4">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`p-3 rounded-lg transition-all ${
-              activeTab === 'overview' ? 'bg-white/10' : 'hover:bg-white/5'
-            }`}
-          >
-            <LineChartIcon className="w-6 h-6" />
-          </button>
-          <button
-            onClick={() => setActiveTab('insights')}
-            className={`p-3 rounded-lg transition-all ${
-              activeTab === 'insights' ? 'bg-white/10' : 'hover:bg-white/5'
-            }`}
-          >
-            <PieChartIcon className="w-6 h-6" />
-          </button>
-          <button
-            onClick={() => setActiveTab('comparison')}
-            className={`p-3 rounded-lg transition-all ${
-              activeTab === 'comparison' ? 'bg-white/10' : 'hover:bg-white/5'
-            }`}
-          >
-            <BarChartIcon className="w-6 h-6" />
-          </button>
-          <button
-            onClick={() => setActiveTab('alerts')}
-            className={`p-3 rounded-lg transition-all ${
-              activeTab === 'alerts' ? 'bg-white/10' : 'hover:bg-white/5'
-            }`}
-          >
-            <AlertTriangle className="w-6 h-6" />
-          </button>
+        <button
+  onClick={() => setActiveTab('overview')}
+  title="Overall Sentiment Analysis"
+  className={`p-3 rounded-lg transition-colors duration-200 ${
+    activeTab === 'overview'
+      ? 'bg-white/10 text-white'
+      : 'text-gray-400 hover:bg-white/5 hover:text-white'
+  }`}
+>
+  <LineChartIcon className="w-6 h-6" />
+</button>
 
-          <button
+<button
+  onClick={() => setActiveTab('insights')}
+  title="Pros / Cons"
+  className={`p-3 rounded-lg transition-colors duration-200 ${
+    activeTab === 'insights'
+      ? 'bg-white/10 text-white'
+      : 'text-gray-400 hover:bg-white/5 hover:text-white'
+  }`}
+>
+  <PieChartIcon className="w-6 h-6" />
+</button>
+
+<button
+  onClick={() => setActiveTab('comparison')}
+  title="Platform Comparison"
+  className={`p-3 rounded-lg transition-colors duration-200 ${
+    activeTab === 'comparison'
+      ? 'bg-white/10 text-white'
+      : 'text-gray-400 hover:bg-white/5 hover:text-white'
+  }`}
+>
+  <BarChartIcon className="w-6 h-6" />
+</button>
+
+<button
   onClick={() => setActiveTab('categories')}
-  className={`p-3 rounded-lg transition-all ${activeTab === 'categories' ? 'bg-white/10' : 'hover:bg-white/5'}`}
-  title="Categories"
+  title="Category Analysis"
+  className={`p-3 rounded-lg transition-colors duration-200 ${
+    activeTab === 'categories'
+      ? 'bg-white/10 text-white'
+      : 'text-gray-400 hover:bg-white/5 hover:text-white'
+  }`}
 >
   <FolderHeart className="w-6 h-6" />
 </button>
 
 <button
   onClick={() => setActiveTab('monthlyFeedback')}
-  className={`p-3 rounded-lg transition-all ${
-    activeTab === 'monthlyFeedback' ? 'bg-white/10' : 'hover:bg-white/5'
+  title="Monthly Sementic Analysis"
+  className={`p-3 rounded-lg transition-colors duration-200 ${
+    activeTab === 'monthlyFeedback'
+      ? 'bg-white/10 text-white'
+      : 'text-gray-400 hover:bg-white/5 hover:text-white'
   }`}
 >
   <ListChecks className="w-6 h-6" />
 </button>
+
 
 
         </nav>

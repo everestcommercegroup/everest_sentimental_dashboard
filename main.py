@@ -393,7 +393,7 @@ def pros_cons(
             "No extra text, just a clear list of pros and cons with dashes."
         )
 
-        response = openai.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4o",  # or your chosen model
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
@@ -891,6 +891,52 @@ def get_category_analysis(category: str, company: str = Query(None)):
         "cons": cons,
         "sentimental_categories": sentimental_categories
     }
+
+def convert_object_ids(obj):
+    # Recursively convert ObjectId values to strings.
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, list):
+        return [convert_object_ids(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_object_ids(value) for key, value in obj.items()}
+    else:
+        return obj
+
+@app.get("/report/issue_details")
+def issue_details(
+    category: str = Query(...), 
+    sentiment: str = Query(None),
+    company: str = Query(None),
+    limit: int = Query(20)
+):
+    try:
+        match = {}
+        if company:
+            match["company"] = company
+
+        # Convert the provided category to snake_case
+        snake_case_cat = category.lower().replace(" ", "_")
+        match["overall_sentimental_category"] = snake_case_cat
+
+        # If sentiment is provided, filter by it
+        if sentiment:
+            match["overall_sentiment"] = sentiment
+
+        docs = list(reviews_collection.find(match).limit(limit))
+        
+        # Convert _id and other ObjectIds recursively, and format time_period
+        docs = [convert_object_ids(doc) for doc in docs]
+        for d in docs:
+            if "time_period" in d and d["time_period"]:
+                # Format the datetime as "YYYY-MM-DD HH:MM:SS"
+                d["time_period"] = d["time_period"].strftime("%Y-%m-%d %H:%M:%S")
+        
+        return {"reviews": docs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 # Chat endpoint remains the same
 # @app.post("/chat")

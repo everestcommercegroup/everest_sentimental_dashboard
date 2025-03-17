@@ -75,6 +75,11 @@ interface TrendData {
   neutral: number;
 }
 
+interface TrendDataWithFeedback extends TrendData {
+  top_positive: Array<{ category: string; count: number }>;
+  top_negative: Array<{ category: string; count: number }>;
+}
+
 interface TopFeedback {
   category: string;
   count: number;
@@ -120,6 +125,41 @@ const emotionColors: { [key: string]: string } = {
   satisfied: '#22C55E'
 };
 
+
+function MonthlyFeedbackTooltip({ active, payload, label }: any) {
+  if (!active || !payload || payload.length === 0) return null;
+  const dataPoint: TrendDataWithFeedback = payload[0].payload;
+  return (
+    <div className="p-3 bg-black text-white rounded shadow-md">
+      <div className="mb-2 font-bold">{label}</div>
+      <div className="text-sm mb-1">
+        Positive: {dataPoint.positive} | Negative: {dataPoint.negative} | Neutral: {dataPoint.neutral}
+      </div>
+      {dataPoint.top_positive && dataPoint.top_positive.length > 0 && (
+        <>
+          <div className="font-semibold mt-2 text-green-400">Top 3 Strengths:</div>
+          {dataPoint.top_positive.map((pos, idx) => (
+            <div key={idx} className="text-xs text-gray-200">
+              • {pos.category} ({pos.count} mentions)
+            </div>
+          ))}
+        </>
+      )}
+      {dataPoint.top_negative && dataPoint.top_negative.length > 0 && (
+        <>
+          <div className="font-semibold mt-2 text-red-400">Top 3 Critical:</div>
+          {dataPoint.top_negative.map((neg, idx) => (
+            <div key={idx} className="text-xs text-gray-200">
+              • {neg.category} ({neg.count} mentions)
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+
 function App() {
 
 
@@ -153,6 +193,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [showAllPositive, setShowAllPositive] = useState(false);
   const [showAllNegative, setShowAllNegative] = useState(false);
+  const [combinedTrendData, setCombinedTrendData] = useState<TrendDataWithFeedback[]>([]);
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 const [categoryAnalysis, setCategoryAnalysis] = useState<CategoryAnalysis | null>(null);
@@ -368,6 +409,21 @@ const CompanySelector = () => (
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    // Combine trendData and monthlyFeedback into one array
+    if (trendData.length && monthlyFeedback.length) {
+      const combined = trendData.map((td) => {
+        const matching = monthlyFeedback.find((m) => m.month === td.month);
+        return {
+          ...td,
+          top_positive: matching ? matching.top_positive : [],
+          top_negative: matching ? matching.top_negative : []
+        };
+      });
+      setCombinedTrendData(combined);
+    }
+  }, [trendData, monthlyFeedback]);
+  
   const pieChartData = useMemo(() => 
     createPieData(overallData.overall_sentiment),
     [overallData.overall_sentiment]
@@ -990,17 +1046,18 @@ function MonthlyFeedbackCards({ data }: Props) {
 <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 h-96 w-full max-w-full">
   <h2 className="text-xl font-semibold mb-4">Sentiment Trends</h2>
   <ResponsiveContainer width="100%" height={350}>
-    <LineChart data={trendData} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-      <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" />
-      <YAxis stroke="rgba(255,255,255,0.5)" />
-      <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }} />
-      <Legend verticalAlign="bottom" align="center" wrapperStyle={{ paddingTop: '10px' }} />
-      <Line type="monotone" dataKey="positive" stroke="#10B981" strokeWidth={2} dot={false} name="Positive" />
-      <Line type="monotone" dataKey="negative" stroke="#EF4444" strokeWidth={2} dot={false} name="Negative" />
-      <Line type="monotone" dataKey="neutral" stroke="#6B7280" strokeWidth={2} dot={false} name="Neutral" />
-    </LineChart>
-  </ResponsiveContainer>
+  <LineChart data={combinedTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
+    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+    <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" />
+    <YAxis stroke="rgba(255,255,255,0.5)" />
+    <Tooltip content={<MonthlyFeedbackTooltip />} />
+    <Legend verticalAlign="bottom" align="center" wrapperStyle={{ paddingTop: '10px' }} />
+    <Line type="monotone" dataKey="positive" stroke="#10B981" strokeWidth={2} dot={false} name="Positive" />
+    <Line type="monotone" dataKey="negative" stroke="#EF4444" strokeWidth={2} dot={false} name="Negative" />
+    <Line type="monotone" dataKey="neutral" stroke="#6B7280" strokeWidth={2} dot={false} name="Neutral" />
+  </LineChart>
+</ResponsiveContainer>
+
 </div>
 
 

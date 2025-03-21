@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
+
 import {
   X,
+  Star,
   LineChart as LineChartIcon,
   BarChart as BarChartIcon,
   CircleSlash,
@@ -16,14 +18,29 @@ import {
   XCircle,
   Tag,
   ListChecks,
-  ChevronDown
+  ChevronDown,
+  Users,         // <-- New
+  TrendingUp,    // <-- New
+  DollarSign,    // <-- New
+  ShoppingBag    // <-- New
 } from 'lucide-react';
+
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, Area, AreaChart, ReferenceLine, Cell, PieChart, Pie } from 'recharts';
 import { ResponsivePie } from '@nivo/pie';
 import { safeNumber, safeString, createSafeObject, createPieData } from './utils/chart-helpers';
 
 // Types
+
+interface CategoryAnalysis {
+  category: string;
+  pros: string[];
+  cons: string[];
+  sentimental_categories: string[];
+  detail_counts: { [key: string]: number };
+  sentiment_counts: { positive: number; negative: number; neutral: number };
+}
+
 interface OverallReport {
   overall_sentiment: {
     positive: number;
@@ -113,6 +130,7 @@ interface DetailCategoryReport {
   details: DetailCategory[];
 }
 
+
 // Emotion color mapping
 const emotionColors: { [key: string]: string } = {
   angry: '#EF4444',
@@ -172,6 +190,21 @@ function App() {
   const [selectedEmotion, setSelectedEmotion] = useState<string | null>(null);
   const [categoryDetails, setCategoryDetails] = useState<DetailCategory | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  interface ShopifyInsights {
+    company: string;
+    total_gross_sales: number;
+    total_customers: number;
+    total_orders: number; // <--- Add this
+
+    best_selling_products: Array<{
+      product: string;
+      quantity_sold: number;
+      revenue: number;
+    }>;
+  }
+  
+  const [shopifyData, setShopifyData] = useState<ShopifyInsights | null>(null);
+  
   const [selectedPlatform, setSelectedPlatform] = useState('all');
   const [timeFilter, setTimeFilter] = useState('30');
   const [overallData, setOverallData] = useState<OverallReport>({
@@ -412,6 +445,9 @@ const CompanySelector = () => (
     fetchData();
   }, [fetchData]);
 
+
+  
+
   useEffect(() => {
     // Combine trendData and monthlyFeedback into one array
     if (trendData.length && monthlyFeedback.length) {
@@ -426,6 +462,29 @@ const CompanySelector = () => (
       setCombinedTrendData(combined);
     }
   }, [trendData, monthlyFeedback]);
+  
+  const fetchShopifyData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await axios.get(`${API_BASE_URL}/shopify_insights`, {
+        params: { company: selectedCompany }
+      });
+      setShopifyData(response.data);
+    } catch (err) {
+      console.error("Error fetching Shopify data:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch Shopify data");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedCompany, API_BASE_URL]);
+
+  useEffect(() => {
+    if (activeTab === 'shopify') {
+      fetchShopifyData();
+    }
+  }, [activeTab, fetchShopifyData]);
+
   
   const pieChartData = useMemo(() => 
     createPieData(overallData.overall_sentiment),
@@ -966,9 +1025,225 @@ function MonthlyFeedbackCards({ data }: Props) {
   );
 }
 
+console.log("Shopify data:", shopifyData);
+
+
+const StatsOverview = ({ overallData }) => {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      {/* Positive Sentiment */}
+      <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-green-500/10 rounded-lg">
+            <ThumbsUp className="w-6 h-6 text-green-500" />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Positive
+            </h3>
+            <p className="text-3xl font-extrabold text-white">
+              {overallData.overall_sentiment.positive.toFixed(1)}%
+            </p>
+            <p className="text-lg font-bold text-gray-300">
+              {overallData.sentiment_counts.positive.toLocaleString()} reviews
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Negative Sentiment */}
+      <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-red-500/10 rounded-lg">
+            <ThumbsDown className="w-6 h-6 text-red-500" />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Negative
+            </h3>
+            <p className="text-3xl font-extrabold text-white">
+              {overallData.overall_sentiment.negative.toFixed(1)}%
+            </p>
+            <p className="text-lg font-bold text-gray-300">
+              {overallData.sentiment_counts.negative.toLocaleString()} reviews
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Neutral Sentiment */}
+      <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-gray-500/10 rounded-lg">
+            <Minus className="w-6 h-6 text-gray-500" />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Neutral
+            </h3>
+            <p className="text-3xl font-extrabold text-white">
+              {overallData.overall_sentiment.neutral.toFixed(1)}%
+            </p>
+            <p className="text-lg font-bold text-gray-300">
+              {overallData.sentiment_counts.neutral.toLocaleString()} reviews
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+
   const renderContent = () => {
     return (
       <>
+
+{activeTab !== 'shopify' && <StatsOverview overallData={overallData} />}
+
+
+
+{activeTab === 'shopify' && (
+  <div className="space-y-8">
+    <h2 className="text-2xl font-bold text-white mb-6">
+      Shopify Analytics Overview
+    </h2>
+    
+    {/* Change md:grid-cols-3 to md:grid-cols-4 */}
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      {/* Total Gross Sales */}
+      <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-green-500/10 rounded-lg">
+            <DollarSign className="w-6 h-6 text-green-500" />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Total Gross Sales
+            </h3>
+            <p className="text-3xl font-extrabold text-white">
+              €{shopifyData?.total_gross_sales.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Total Customers */}
+      <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-blue-500/10 rounded-lg">
+            <Users className="w-6 h-6 text-blue-500" />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Total Customers
+            </h3>
+            <p className="text-3xl font-extrabold text-white">
+              {shopifyData?.total_customers.toLocaleString()}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Avg Order Value */}
+      <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-purple-500/10 rounded-lg">
+            <TrendingUp className="w-6 h-6 text-purple-500" />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Avg Order Value
+            </h3>
+            <p className="text-3xl font-extrabold text-white">
+              €
+              {shopifyData &&
+                (shopifyData.total_gross_sales / shopifyData.total_customers).toLocaleString(
+                  undefined,
+                  { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                )}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* NEW: Total Orders */}
+      <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+  <div className="flex items-center gap-4">
+    <div className="p-3 bg-indigo-500/10 rounded-lg">
+      <ShoppingBag className="w-6 h-6 text-indigo-500" />
+    </div>
+    <div>
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+        Total Orders
+      </h3>
+      <p className="text-3xl font-extrabold text-white">
+        {shopifyData?.total_orders?.toLocaleString()}
+      </p>
+    </div>
+  </div>
+</div>
+
+    </div>
+  
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+  <h3 className="text-xl font-semibold mb-6">Best Selling Products</h3>
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+    {shopifyData?.best_selling_products?.map((item, index) => (
+      <div
+        key={index}
+        className="relative p-6 rounded-lg border border-white/20
+                   bg-gradient-to-br from-gray-800 to-gray-900
+                   hover:from-gray-700 hover:to-gray-800 transition
+                   shadow-lg hover:shadow-2xl hover:scale-[1.02]"
+      >
+        {/* Rank Badge (optional) */}
+        <span className="absolute top-2 right-2 text-lg font-extrabold text-white">
+  #{index + 1}
+</span>
+
+
+        <h4 className="text-xl font-bold text-white mb-2">{item.product}</h4>
+
+        {/* "Top Seller" label with a star icon (optional) */}
+        <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
+          <Star className="w-4 h-4 text-yellow-400" />
+          <span>Top Seller</span>
+        </div>
+
+        <div className="flex items-center justify-between">
+          {/* Quantity Sold */}
+          <div>
+            <p className="text-sm text-gray-400">Quantity Sold</p>
+            <p className="text-lg font-semibold text-gray-100">
+              {item.quantity_sold}
+            </p>
+          </div>
+
+          <div className="border-l border-white/10 h-10 mx-4" />
+
+          {/* Revenue */}
+          <div>
+            <p className="text-sm text-gray-400">Revenue</p>
+            <p className="text-lg font-semibold text-green-400">
+              €{item.revenue.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })}
+            </p>
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+</div>
+        </div>
+      )}
+
       {issueModalOpen && (
   <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
     <div className="bg-gray-900 p-6 rounded-lg max-w-2xl w-full border border-white/10">
@@ -1017,7 +1292,7 @@ function MonthlyFeedbackCards({ data }: Props) {
         onEmotionClick={handleEmotionClick}
       /> */}
       
-      {(activeTab !== 'categories' && activeTab !== 'monthlyFeedback') && (
+      {(activeTab !== 'categories' && activeTab !== 'monthlyFeedback' && activeTab!= 'shopify') && (
   <>
     <EmotionalStats
       emotionalData={emotionalData}
@@ -1422,7 +1697,17 @@ function MonthlyFeedbackCards({ data }: Props) {
 >
   <ListChecks className="w-6 h-6" />
 </button>
-
+<button
+    onClick={() => setActiveTab('shopify')}
+    title="Shopify Analytics"
+    className={`p-3 rounded-lg transition-colors duration-200 ${
+      activeTab === 'shopify'
+        ? 'bg-white/10 text-white'
+        : 'text-gray-400 hover:bg-white/5 hover:text-white'
+    }`}
+  >
+    <ShoppingBag className="w-6 h-6" />
+  </button>
 
 
         </nav>
@@ -1446,68 +1731,8 @@ function MonthlyFeedbackCards({ data }: Props) {
           
         </div>
 
-{/* Stats Overview */}
-<div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-  {/* Positive Sentiment */}
-  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-    <div className="flex items-center gap-4">
-      <div className="p-3 bg-green-500/10 rounded-lg">
-        <ThumbsUp className="w-6 h-6 text-green-500" />
-      </div>
-      <div>
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-          Positive
-        </h3>
-        <p className="text-3xl font-extrabold text-white">
-          {overallData.overall_sentiment.positive.toFixed(1)}%
-        </p>
-        <p className="text-lg font-bold text-gray-300">
-          {overallData.sentiment_counts.positive.toLocaleString()} reviews
-        </p>
-      </div>
-    </div>
-  </div>
 
-  {/* Negative Sentiment */}
-  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-    <div className="flex items-center gap-4">
-      <div className="p-3 bg-red-500/10 rounded-lg">
-        <ThumbsDown className="w-6 h-6 text-red-500" />
-      </div>
-      <div>
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-          Negative
-        </h3>
-        <p className="text-3xl font-extrabold text-white">
-          {overallData.overall_sentiment.negative.toFixed(1)}%
-        </p>
-        <p className="text-lg font-bold text-gray-300">
-          {overallData.sentiment_counts.negative.toLocaleString()} reviews
-        </p>
-      </div>
-    </div>
-  </div>
 
-  {/* Neutral Sentiment */}
-  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-    <div className="flex items-center gap-4">
-      <div className="p-3 bg-gray-500/10 rounded-lg">
-        <Minus className="w-6 h-6 text-gray-500" />
-      </div>
-      <div>
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-          Neutral
-        </h3>
-        <p className="text-3xl font-extrabold text-white">
-          {overallData.overall_sentiment.neutral.toFixed(1)}%
-        </p>
-        <p className="text-lg font-bold text-gray-300">
-          {overallData.sentiment_counts.neutral.toLocaleString()} reviews
-        </p>
-      </div>
-    </div>
-  </div>
-</div>
 
 
         {activeTab === 'categories' && (

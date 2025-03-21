@@ -936,7 +936,26 @@ def issue_details(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+################################### Shopify Data ################################################################
 
+# Lifetime Shopify Data
+shopify_insights_lifetime_collection = db["shopify_insights_lifetime"]
+
+@app.get("/shopify_insights")
+def get_shopify_insights():
+    # Fetch one document from the collection
+    document = shopify_insights_lifetime_collection.find_one()
+    if not document:
+        raise HTTPException(status_code=404, detail="Data not found")
+    
+    # Return only the specified keys
+    return {
+        "company": document.get("company"),
+        "total_gross_sales": document.get("total_gross_sales"),
+        "total_customers": document.get("total_customers"),
+        "total_orders":document.get("total_orders"),
+        "best_selling_products": document.get("best_selling_products"),
+    }
 
 # Chat endpoint remains the same
 # @app.post("/chat")

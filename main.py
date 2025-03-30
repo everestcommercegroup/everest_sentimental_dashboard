@@ -650,20 +650,24 @@ def get_reviews(
         raise HTTPException(status_code=500, detail=str(e))
 
 class OverallDetailReport(BaseModel):
-    overall_sentiment_detail: dict
+    overall_sentiment_detail: Dict[str, Dict[str, float]]  # e.g. {"happy": {"count": 120, "percentage": 40.0}, ...}
     total_reviews: int
     last_updated: datetime.datetime
 
 @app.get("/report/overall_detail", response_model=OverallDetailReport)
 def overall_detail(
     platform: str = Query(None),
-    days: int = Query(60),
+    days: Optional[int] = Query(None),
     company: str = Query(None)
 ):
     now = datetime.datetime.utcnow()
-    start = now - datetime.timedelta(days=days)
+    if days is not None:
+        start = now - datetime.timedelta(days=days)
+        start_str, end_str = start.isoformat(), now.isoformat()
+    else:
+        start_str, end_str = None, None
 
-    match = common_match(platform, start.isoformat(), now.isoformat(), company)
+    match = common_match(platform, start_str, end_str, company)
     total = reviews_collection.count_documents(match)
     if total == 0:
         raise HTTPException(status_code=404, detail="No review data found for sentiment detail")
@@ -677,17 +681,31 @@ def overall_detail(
     detail_distribution = {}
     for doc in results:
         detail_name = doc["_id"]
+        # Filter out entries with no label (None, empty string, or only whitespace)
+        if not detail_name or (isinstance(detail_name, str) and detail_name.strip() == ""):
+            continue
+
         count = doc["count"]
-        detail_distribution[detail_name] = round((count / total) * 100, 2)
+        percentage = round((count / total) * 100, 2)
+        # Filter out entries with zero count or percentage below threshold (e.g., less than 1%)
+        if count == 0 or percentage < 1.0:
+            continue
+
+        detail_distribution[detail_name] = {
+            "count": count,
+            "percentage": percentage
+        }
 
     latest_doc = reviews_collection.find_one(match, sort=[("time_period", -1)])
-    last_updated = latest_doc.get("time_period", now)
+    last_updated = latest_doc.get("time_period", now) if latest_doc else now
 
     return OverallDetailReport(
         overall_sentiment_detail=detail_distribution,
         total_reviews=total,
         last_updated=last_updated
     )
+
+
 
 @app.get("/report/category_sentiment_details")
 def category_sentiment_details(

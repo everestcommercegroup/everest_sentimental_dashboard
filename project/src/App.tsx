@@ -768,20 +768,22 @@ const CompanySelector = () => (
 
 
   // Add this new component definition to replace the pie chart
-function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: OverallDetailReport; onEmotionClick: (emotion: string) => void }) {
+  function EmotionalStats({ emotionalData, onEmotionClick }: { 
+    emotionalData: { overall_sentiment_detail: Record<string, { count: number; percentage: number }> };
+    onEmotionClick: (emotion: string) => void;
+  }) {
     return (
       <div className="mb-8">
         <h2 className="text-xl font-semibold mb-4">Emotional Analysis</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {Object.entries(emotionColors).map(([emotion, color]) => {
-            // Use 0 if the API doesn't return a value for that emotion
-            const value = emotionalData.overall_sentiment_detail[emotion] || 0;
+          {Object.entries(emotionalData.overall_sentiment_detail).map(([emotion, stats]) => {
+            const { count, percentage } = stats;
             return (
               <div
                 key={emotion}
                 className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-all group cursor-pointer"
-                style={{ borderLeftColor: color, borderLeftWidth: '4px' }}
-                onClick={() => onEmotionClick(emotion)} // <-- new onClick handler
+                style={{ borderLeftColor: emotionColors[emotion] || '#6B7280', borderLeftWidth: '4px' }}
+                onClick={() => onEmotionClick(emotion)}
               >
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="text-sm font-medium capitalize text-gray-400">
@@ -789,21 +791,12 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
                   </h3>
                   <div
                     className="w-3 h-3 rounded-full"
-                    style={{ backgroundColor: color }}
+                    style={{ backgroundColor: emotionColors[emotion] || '#6B7280' }}
                   />
                 </div>
                 <div className="flex items-baseline gap-2">
-                  <p className="text-2xl font-bold">{value.toFixed(1)}%</p>
-                  <div className="h-1 flex-1 rounded-full bg-white/10 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500 ease-out"
-                      style={{
-                        width: `${value}%`,
-                        backgroundColor: color,
-                        opacity: 0.5,
-                      }}
-                    />
-                  </div>
+                  <p className="text-2xl font-bold">{percentage.toFixed(1)}%</p>
+                  <p className="text-sm text-gray-300">({count} reviews)</p>
                 </div>
               </div>
             );
@@ -812,6 +805,7 @@ function EmotionalStats({ emotionalData, onEmotionClick }: { emotionalData: Over
       </div>
     );
   }
+  
 
   function handleIssueClick(categoryName: string, sentiment: string) {
     axios.get(`${API_BASE_URL}/report/issue_details`, {
@@ -1650,7 +1644,7 @@ const StatsOverview = ({ overallData }) => {
   <LineChartIcon className="w-6 h-6" />
 </button>
 
-<button
+{/* <button
   onClick={() => setActiveTab('insights')}
   title="Pros / Cons"
   className={`p-3 rounded-lg transition-colors duration-200 ${
@@ -1660,9 +1654,9 @@ const StatsOverview = ({ overallData }) => {
   }`}
 >
   <PieChartIcon className="w-6 h-6" />
-</button>
+</button> */}
 
-<button
+{/* <button
   onClick={() => setActiveTab('comparison')}
   title="Platform Comparison"
   className={`p-3 rounded-lg transition-colors duration-200 ${
@@ -1672,7 +1666,7 @@ const StatsOverview = ({ overallData }) => {
   }`}
 >
   <BarChartIcon className="w-6 h-6" />
-</button>
+</button> */}
 
 <button
   onClick={() => setActiveTab('categories')}

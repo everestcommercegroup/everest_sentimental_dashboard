@@ -352,87 +352,87 @@ def negative_trends(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 4) Pros and Cons via GPT: Top 10 repeated positive as pros and top 10 negative as cons
-@app.get("/report/pros_cons", response_model=ProsConsReport)
-def pros_cons(
-    platform: str = Query(None),
-    start_date: str = Query(None),
-    end_date: str = Query(None),
-    company: str = Query(None)
-):
-    """
-    Returns a structured list of pros and cons from GPT,
-    each as { "text": <string>, "count": <int> } objects.
-    """
-    try:
-        match = common_match(platform, start_date, end_date, company)
+# @app.get("/report/pros_cons", response_model=ProsConsReport)
+# def pros_cons(
+#     platform: str = Query(None),
+#     start_date: str = Query(None),
+#     end_date: str = Query(None),
+#     company: str = Query(None)
+# ):
+#     """
+#     Returns a structured list of pros and cons from GPT,
+#     each as { "text": <string>, "count": <int> } objects.
+#     """
+#     try:
+#         match = common_match(platform, start_date, end_date, company)
 
-        positive_pipeline = [
-            {"$match": {**match, "overall_sentiment": "positive"}},
-            {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-            {"$limit": 10}
-        ]
-        negative_pipeline = [
-            {"$match": {**match, "overall_sentiment": "negative"}},
-            {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-            {"$limit": 10}
-        ]
+#         positive_pipeline = [
+#             {"$match": {**match, "overall_sentiment": "positive"}},
+#             {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
+#             {"$sort": {"count": -1}},
+#             {"$limit": 10}
+#         ]
+#         negative_pipeline = [
+#             {"$match": {**match, "overall_sentiment": "negative"}},
+#             {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
+#             {"$sort": {"count": -1}},
+#             {"$limit": 10}
+#         ]
 
-        pos_results = list(reviews_collection.aggregate(positive_pipeline))
-        neg_results = list(reviews_collection.aggregate(negative_pipeline))
+#         pos_results = list(reviews_collection.aggregate(positive_pipeline))
+#         neg_results = list(reviews_collection.aggregate(negative_pipeline))
 
-        pros_text = " ; ".join([doc["_id"] for doc in pos_results if doc["_id"]])
-        cons_text = " ; ".join([doc["_id"] for doc in neg_results if doc["_id"]])
+#         pros_text = " ; ".join([doc["_id"] for doc in pos_results if doc["_id"]])
+#         cons_text = " ; ".join([doc["_id"] for doc in neg_results if doc["_id"]])
 
-        prompt = (
-            f"Here are the top positive points:\n{pros_text}\n\n"
-            f"And here are the top negative points:\n{cons_text}\n\n"
-            "Please summarize them in the format:\n\n"
-            "Pros:\n- <pro1>\n- <pro2>\n\nCons:\n- <con1>\n- <con2>\n"
-            "No extra text, just a clear list of pros and cons with dashes."
-        )
+#         prompt = (
+#             f"Here are the top positive points:\n{pros_text}\n\n"
+#             f"And here are the top negative points:\n{cons_text}\n\n"
+#             "Please summarize them in the format:\n\n"
+#             "Pros:\n- <pro1>\n- <pro2>\n\nCons:\n- <con1>\n- <con2>\n"
+#             "No extra text, just a clear list of pros and cons with dashes."
+#         )
 
-        response = openai.ChatCompletion.create(
-            model="gpt-4o",  # or your chosen model
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=200
-        )
-        reply_str = response.choices[0].message.content.strip()
+#         response = openai.ChatCompletion.create(
+#             model="gpt-4o",  # or your chosen model
+#             messages=[{"role": "user", "content": prompt}],
+#             temperature=0.7,
+#             max_tokens=200
+#         )
+#         reply_str = response.choices[0].message.content.strip()
 
-        pros_list = []
-        cons_list = []
-        current_section = None
+#         pros_list = []
+#         cons_list = []
+#         current_section = None
 
-        for line in reply_str.splitlines():
-            line_stripped = line.strip()
-            line_lower = line_stripped.lower()
+#         for line in reply_str.splitlines():
+#             line_stripped = line.strip()
+#             line_lower = line_stripped.lower()
 
-            if line_lower.startswith("pros:"):
-                current_section = "pros"
-                continue
-            elif line_lower.startswith("cons:"):
-                current_section = "cons"
-                continue
+#             if line_lower.startswith("pros:"):
+#                 current_section = "pros"
+#                 continue
+#             elif line_lower.startswith("cons:"):
+#                 current_section = "cons"
+#                 continue
 
-            if current_section == "pros" and line_stripped.startswith("-"):
-                item_text = line_stripped.lstrip("-").strip()
-                if item_text:
-                    pros_list.append({"text": item_text, "count": 1})
-            elif current_section == "cons" and line_stripped.startswith("-"):
-                item_text = line_stripped.lstrip("-").strip()
-                if item_text:
-                    cons_list.append({"text": item_text, "count": 1})
+#             if current_section == "pros" and line_stripped.startswith("-"):
+#                 item_text = line_stripped.lstrip("-").strip()
+#                 if item_text:
+#                     pros_list.append({"text": item_text, "count": 1})
+#             elif current_section == "cons" and line_stripped.startswith("-"):
+#                 item_text = line_stripped.lstrip("-").strip()
+#                 if item_text:
+#                     cons_list.append({"text": item_text, "count": 1})
 
-        return ProsConsReport(pros=pros_list, cons=cons_list)
+#         return ProsConsReport(pros=pros_list, cons=cons_list)
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 # 5) Table for top 10 negative, positive, neutral categories (grouped by overall_sentimental_category)
 @app.get("/report/category_table")
-def category_table(
+def category_table_pros_cons(
     platform: str = Query(None),
     sentiment: str = Query(None),
     limit: int = Query(10),
@@ -442,13 +442,13 @@ def category_table(
 ):
     try:
         match = common_match(platform, start_date, end_date, company)
-        match["overall_sentimental_category"] = {"$ne": ""}
+        match["category"] = {"$ne": ""}
         if sentiment:
             match["overall_sentiment"] = sentiment
         
         pipeline = [
             {"$match": match},
-            {"$group": {"_id": "$overall_sentimental_category", "count": {"$sum": 1}}},
+            {"$group": {"_id": "$category", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}},
             {"$limit": limit}
         ]
@@ -470,6 +470,86 @@ def category_table(
 
         return {"table": table}
     except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# 5.1 for fetching overall_sementic categories from category
+@app.get("/report/overall_sentimental_category_pros_cons")
+def overall_sentimental_category_pros_cons(
+    parent_category: str = Query(..., description="The parent category to filter on (e.g., 'Returns & Refunds')"),
+    sentiment: str = Query(None, description="Sentiment to filter on (e.g., 'positive' or 'negative')"),
+    company: str = Query(None),
+    limit: int = Query(5)
+):
+    try:
+        # Build a simple match filter without platform or time filters.
+        match = {}
+        if company:
+            match["company"] = company
+        
+        # Directly match the parent_category and ensure overall_sentimental_category is non-empty.
+        match["category"] = parent_category
+        match["overall_sentimental_category"] = {"$ne": ""}
+        
+        # If sentiment is provided, add it to the filter.
+        if sentiment:
+            match["overall_sentiment"] = sentiment
+        
+        pipeline = [
+            {"$match": match},
+            {"$group": {
+                "_id": "$overall_sentimental_category",
+                "count": {"$sum": 1}
+            }},
+            {"$sort": {"count": -1}},
+            {"$limit": limit}
+        ]
+        results = list(reviews_collection.aggregate(pipeline))
+        
+        table = []
+        for doc in results:
+            table.append({
+                "category": humanize_snake_case(doc["_id"]),
+                "count": doc["count"]
+            })
+        
+        return {"table": table}
+    
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 5.2
+@app.get("/report/issue_details")
+def issue_details(
+    category: str = Query(...), 
+    sentiment: str = Query(None),
+    company: str = Query(None),
+    limit: int = Query(20)
+):
+    try:
+        match = {}
+        if company:
+            match["company"] = company
+
+        # Convert the provided category to snake_case
+        snake_case_cat = category.lower().replace(" ", "_")
+        match["overall_sentimental_category"] = snake_case_cat
+        
+        # If sentiment is provided, filter by it
+        if sentiment:
+            match["overall_sentiment"] = sentiment
+
+        docs = list(reviews_collection.find(match).limit(limit))
+        
+        # Convert ObjectId values to strings recursively.
+        docs = [convert_object_ids(doc) for doc in docs]
+        for d in docs:
+            if "time_period" in d and d["time_period"]:
+                # Format datetime as "YYYY-MM-DD HH:MM:SS"
+                d["time_period"] = d["time_period"].strftime("%Y-%m-%d %H:%M:%S")
+        
+        return {"reviews": docs}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -551,67 +631,67 @@ def top_pros_cons(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 8) Platform Comparison: grouped bar chart comparing each platform's sentiment distribution
-class PlatformComparisonItem(BaseModel):
-    platform: str
-    positive: float
-    negative: float
-    neutral: float
+# class PlatformComparisonItem(BaseModel):
+#     platform: str
+#     positive: float
+#     negative: float
+#     neutral: float
 
-class PlatformComparisonResponse(BaseModel):
-    platforms: List[PlatformComparisonItem]
+# class PlatformComparisonResponse(BaseModel):
+#     platforms: List[PlatformComparisonItem]
 
-@app.get("/report/platform_comparison", response_model=PlatformComparisonResponse)
-def platform_comparison(
-    days: int = Query(60),
-    company: str = Query(None)
-):
-    try:
-        now = datetime.datetime.utcnow()
-        start = now - datetime.timedelta(days=days)
+# @app.get("/report/platform_comparison", response_model=PlatformComparisonResponse)
+# def platform_comparison(
+#     days: int = Query(60),
+#     company: str = Query(None)
+# ):
+#     try:
+#         now = datetime.datetime.utcnow()
+#         start = now - datetime.timedelta(days=days)
         
-        platforms = ["gorgias", "trustpilot", "opencx"]
-        data_list = []
+#         platforms = ["gorgias", "trustpilot", "opencx"]
+#         data_list = []
         
-        for p in platforms:
-            match = common_match(p, start.isoformat(), now.isoformat(), company)
-            match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
+#         for p in platforms:
+#             match = common_match(p, start.isoformat(), now.isoformat(), company)
+#             match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
             
-            total = reviews_collection.count_documents(match)
-            if total == 0:
-                data_list.append({
-                    "platform": p,
-                    "positive": 0,
-                    "negative": 0,
-                    "neutral": 0
-                })
-                continue
+#             total = reviews_collection.count_documents(match)
+#             if total == 0:
+#                 data_list.append({
+#                     "platform": p,
+#                     "positive": 0,
+#                     "negative": 0,
+#                     "neutral": 0
+#                 })
+#                 continue
             
-            pipeline = [
-                {"$match": match},
-                {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
-            ]
-            results = list(reviews_collection.aggregate(pipeline))
+#             pipeline = [
+#                 {"$match": match},
+#                 {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
+#             ]
+#             results = list(reviews_collection.aggregate(pipeline))
             
-            pos, neg, neu = 0.0, 0.0, 0.0
-            for doc in results:
-                if doc["_id"] == "positive":
-                    pos = round((doc["count"] / total) * 100, 2)
-                elif doc["_id"] == "negative":
-                    neg = round((doc["count"] / total) * 100, 2)
-                elif doc["_id"] == "neutral":
-                    neu = round((doc["count"] / total) * 100, 2)
+#             pos, neg, neu = 0.0, 0.0, 0.0
+#             for doc in results:
+#                 if doc["_id"] == "positive":
+#                     pos = round((doc["count"] / total) * 100, 2)
+#                 elif doc["_id"] == "negative":
+#                     neg = round((doc["count"] / total) * 100, 2)
+#                 elif doc["_id"] == "neutral":
+#                     neu = round((doc["count"] / total) * 100, 2)
             
-            data_list.append({
-                "platform": p,
-                "positive": pos,
-                "negative": neg,
-                "neutral":  neu
-            })
+#             data_list.append({
+#                 "platform": p,
+#                 "positive": pos,
+#                 "negative": neg,
+#                 "neutral":  neu
+#             })
         
-        return PlatformComparisonResponse(platforms=data_list)
+#         return PlatformComparisonResponse(platforms=data_list)
     
-    except PyMongoError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#     except PyMongoError as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 # 9) Potential Risks: Textual highlight for negative sentiment spike
 from typing import List
@@ -921,38 +1001,7 @@ def convert_object_ids(obj):
     else:
         return obj
 
-@app.get("/report/issue_details")
-def issue_details(
-    category: str = Query(...), 
-    sentiment: str = Query(None),
-    company: str = Query(None),
-    limit: int = Query(20)
-):
-    try:
-        match = {}
-        if company:
-            match["company"] = company
 
-        # Convert the provided category to snake_case
-        snake_case_cat = category.lower().replace(" ", "_")
-        match["overall_sentimental_category"] = snake_case_cat
-
-        # If sentiment is provided, filter by it
-        if sentiment:
-            match["overall_sentiment"] = sentiment
-
-        docs = list(reviews_collection.find(match).limit(limit))
-        
-        # Convert _id and other ObjectIds recursively, and format time_period
-        docs = [convert_object_ids(doc) for doc in docs]
-        for d in docs:
-            if "time_period" in d and d["time_period"]:
-                # Format the datetime as "YYYY-MM-DD HH:MM:SS"
-                d["time_period"] = d["time_period"].strftime("%Y-%m-%d %H:%M:%S")
-        
-        return {"reviews": docs}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 ################################### Shopify Data ################################################################
 

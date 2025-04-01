@@ -230,7 +230,10 @@ function App() {
   const [showAllPositive, setShowAllPositive] = useState(false);
   const [showAllNegative, setShowAllNegative] = useState(false);
   const [combinedTrendData, setCombinedTrendData] = useState<TrendDataWithFeedback[]>([]);
-
+  const [subCategories, setSubCategories] = useState<TopFeedback[]>([]);
+  const [showSubCategoryModal, setShowSubCategoryModal] = useState(false);
+  const [parentCategoryClicked, setParentCategoryClicked] = useState<string | null>(null);
+  const [parentSentiment, setParentSentiment] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 const [categoryAnalysis, setCategoryAnalysis] = useState<CategoryAnalysis | null>(null);
 const [expandedSection, setExpandedSection] = useState<'pros' | 'cons' | 'sentiment' | null>(null);
@@ -485,6 +488,23 @@ const CompanySelector = () => (
     }
   }, [activeTab, fetchShopifyData]);
 
+  // for pros cons front overview code
+  const handleParentTileClick = async (categoryName: string, sentiment: string) => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/report/overall_sentimental_category_pros_cons`, {
+        params: { parent_category: categoryName, sentiment, company: selectedCompany }
+      });
+      // Assuming the API returns an object with "table" as an array of sub-categories
+      setSubCategories(response.data.table);
+      setParentCategoryClicked(categoryName);
+      setParentSentiment(sentiment);
+      setShowSubCategoryModal(true);
+    } catch (error) {
+      console.error("Error fetching sentimental categories", error);
+      setError("Failed to fetch sub-categories");
+    }
+  };
+  
   
   const pieChartData = useMemo(() => 
     createPieData(overallData.overall_sentiment),
@@ -812,12 +832,15 @@ const CompanySelector = () => (
       params: { category: categoryName, sentiment: sentiment, company: selectedCompany }
     })
     .then(response => {
+      console.log("Issue details response:", response.data); // Debug log
+      // Ensure you set the full reviews array:
       setSelectedIssueReviews(response.data.reviews || []);
       setIssueModalOpen(true);
     })
     .catch(error => {
       console.error("Failed to fetch issue details", error);
     });
+    
   }
   
   
@@ -1274,6 +1297,36 @@ const StatsOverview = ({ overallData }) => {
   </div>
 )}
 
+{showSubCategoryModal && (
+  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div className="bg-gray-900 p-6 rounded-lg max-w-md w-full border border-white/10">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold text-white">
+          {parentCategoryClicked} - Subcategories
+        </h2>
+        <button onClick={() => setShowSubCategoryModal(false)}>
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      <div className="space-y-3">
+        {subCategories.map((sub, index) => (
+          <button
+            key={index}
+            onClick={() => {
+              setShowSubCategoryModal(false);
+              handleIssueClick(sub.category, parentSentiment || "positive");
+            }}
+            className="p-3 bg-white/5 rounded-lg text-left w-full hover:bg-white/10 transition"
+          >
+            <p className="text-gray-300">{sub.category}</p>
+            <p className="text-sm text-gray-500">Frequency: {sub.count} mentions</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  </div>
+)}
+
 {activeTab === 'monthlyFeedback' && (
   <MonthlyFeedbackCards data={monthlyFeedback} />
 )}
@@ -1417,13 +1470,14 @@ const StatsOverview = ({ overallData }) => {
 {positiveFeedback.map((item, index) => (
   <button
     key={index}
-    onClick={() => handleIssueClick(item.category, "positive")}
+    onClick={() => handleParentTileClick(item.category, "positive")}
     className="p-3 bg-white/5 rounded-lg text-left w-full hover:bg-white/10 transition"
   >
     <p className="text-gray-300">{item.category}</p>
     <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
   </button>
 ))}
+
 
 </div>
 
@@ -1445,13 +1499,14 @@ const StatsOverview = ({ overallData }) => {
 {criticalIssues.map((item, index) => (
   <button
     key={index}
-    onClick={() => handleIssueClick(item.category, "negative")}
+    onClick={() => handleParentTileClick(item.category, "negative")}
     className="p-3 bg-white/5 rounded-lg border-l-2 border-red-500 text-left w-full hover:bg-white/10 transition"
   >
     <p className="text-gray-300">{item.category}</p>
     <p className="text-sm text-gray-500">Frequency: {item.count} mentions</p>
   </button>
 ))}
+
 
 </div>
 

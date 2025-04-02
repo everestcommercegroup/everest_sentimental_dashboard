@@ -31,6 +31,7 @@ app.add_middleware(
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 reviews_collection = db["sentimental_analysis"]
+monthly_reports_collection = db["sentimental_monthly_reports"]
 
 # --- Pydantic Models ---
 class OverallReport(BaseModel):
@@ -351,86 +352,7 @@ def negative_trends(
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 4) Pros and Cons via GPT: Top 10 repeated positive as pros and top 10 negative as cons
-# @app.get("/report/pros_cons", response_model=ProsConsReport)
-# def pros_cons(
-#     platform: str = Query(None),
-#     start_date: str = Query(None),
-#     end_date: str = Query(None),
-#     company: str = Query(None)
-# ):
-#     """
-#     Returns a structured list of pros and cons from GPT,
-#     each as { "text": <string>, "count": <int> } objects.
-#     """
-#     try:
-#         match = common_match(platform, start_date, end_date, company)
 
-#         positive_pipeline = [
-#             {"$match": {**match, "overall_sentiment": "positive"}},
-#             {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
-#             {"$sort": {"count": -1}},
-#             {"$limit": 10}
-#         ]
-#         negative_pipeline = [
-#             {"$match": {**match, "overall_sentiment": "negative"}},
-#             {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
-#             {"$sort": {"count": -1}},
-#             {"$limit": 10}
-#         ]
-
-#         pos_results = list(reviews_collection.aggregate(positive_pipeline))
-#         neg_results = list(reviews_collection.aggregate(negative_pipeline))
-
-#         pros_text = " ; ".join([doc["_id"] for doc in pos_results if doc["_id"]])
-#         cons_text = " ; ".join([doc["_id"] for doc in neg_results if doc["_id"]])
-
-#         prompt = (
-#             f"Here are the top positive points:\n{pros_text}\n\n"
-#             f"And here are the top negative points:\n{cons_text}\n\n"
-#             "Please summarize them in the format:\n\n"
-#             "Pros:\n- <pro1>\n- <pro2>\n\nCons:\n- <con1>\n- <con2>\n"
-#             "No extra text, just a clear list of pros and cons with dashes."
-#         )
-
-#         response = openai.ChatCompletion.create(
-#             model="gpt-4o",  # or your chosen model
-#             messages=[{"role": "user", "content": prompt}],
-#             temperature=0.7,
-#             max_tokens=200
-#         )
-#         reply_str = response.choices[0].message.content.strip()
-
-#         pros_list = []
-#         cons_list = []
-#         current_section = None
-
-#         for line in reply_str.splitlines():
-#             line_stripped = line.strip()
-#             line_lower = line_stripped.lower()
-
-#             if line_lower.startswith("pros:"):
-#                 current_section = "pros"
-#                 continue
-#             elif line_lower.startswith("cons:"):
-#                 current_section = "cons"
-#                 continue
-
-#             if current_section == "pros" and line_stripped.startswith("-"):
-#                 item_text = line_stripped.lstrip("-").strip()
-#                 if item_text:
-#                     pros_list.append({"text": item_text, "count": 1})
-#             elif current_section == "cons" and line_stripped.startswith("-"):
-#                 item_text = line_stripped.lstrip("-").strip()
-#                 if item_text:
-#                     cons_list.append({"text": item_text, "count": 1})
-
-#         return ProsConsReport(pros=pros_list, cons=cons_list)
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# 5) Table for top 10 negative, positive, neutral categories (grouped by overall_sentimental_category)
 @app.get("/report/category_table")
 def category_table_pros_cons(
     platform: str = Query(None),
@@ -630,68 +552,6 @@ def top_pros_cons(
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 8) Platform Comparison: grouped bar chart comparing each platform's sentiment distribution
-# class PlatformComparisonItem(BaseModel):
-#     platform: str
-#     positive: float
-#     negative: float
-#     neutral: float
-
-# class PlatformComparisonResponse(BaseModel):
-#     platforms: List[PlatformComparisonItem]
-
-# @app.get("/report/platform_comparison", response_model=PlatformComparisonResponse)
-# def platform_comparison(
-#     days: int = Query(60),
-#     company: str = Query(None)
-# ):
-#     try:
-#         now = datetime.datetime.utcnow()
-#         start = now - datetime.timedelta(days=days)
-        
-#         platforms = ["gorgias", "trustpilot", "opencx"]
-#         data_list = []
-        
-#         for p in platforms:
-#             match = common_match(p, start.isoformat(), now.isoformat(), company)
-#             match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
-            
-#             total = reviews_collection.count_documents(match)
-#             if total == 0:
-#                 data_list.append({
-#                     "platform": p,
-#                     "positive": 0,
-#                     "negative": 0,
-#                     "neutral": 0
-#                 })
-#                 continue
-            
-#             pipeline = [
-#                 {"$match": match},
-#                 {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
-#             ]
-#             results = list(reviews_collection.aggregate(pipeline))
-            
-#             pos, neg, neu = 0.0, 0.0, 0.0
-#             for doc in results:
-#                 if doc["_id"] == "positive":
-#                     pos = round((doc["count"] / total) * 100, 2)
-#                 elif doc["_id"] == "negative":
-#                     neg = round((doc["count"] / total) * 100, 2)
-#                 elif doc["_id"] == "neutral":
-#                     neu = round((doc["count"] / total) * 100, 2)
-            
-#             data_list.append({
-#                 "platform": p,
-#                 "positive": pos,
-#                 "negative": neg,
-#                 "neutral":  neu
-#             })
-        
-#         return PlatformComparisonResponse(platforms=data_list)
-    
-#     except PyMongoError as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 # 9) Potential Risks: Textual highlight for negative sentiment spike
 from typing import List
@@ -1001,7 +861,36 @@ def convert_object_ids(obj):
     else:
         return obj
 
+# Api for monthly analysis
+from dateutil.relativedelta import relativedelta
 
+@app.get("/report/monthly_analysis")
+def get_monthly_analysis(
+    company: str = Query(..., description="Company name, e.g., 'cook_and_pan'"),
+    year: int = Query(..., description="Year, e.g., 2025"),
+    month: int = Query(..., description="Month as an integer, e.g., 4")
+):
+    # Create a start date and an end date for the given month
+    start_date = datetime.datetime(year, month, 1)
+    end_date = start_date + relativedelta(months=1)
+    
+    # Build the query to filter by the time_period field (a date)
+    query = {
+        "company": company,
+        "time_period": {"$gte": start_date, "$lt": end_date}
+    }
+    
+    doc = monthly_reports_collection.find_one(query)
+    if not doc:
+        raise HTTPException(status_code=404, detail="No monthly data found for this company and month.")
+    
+    # Convert ObjectId fields to strings and format dates
+    doc = convert_object_ids(doc)
+    if "time_period" in doc and isinstance(doc["time_period"], datetime.datetime):
+        doc["time_period"] = doc["time_period"].isoformat()
+
+    
+    return doc
 
 ################################### Shopify Data ################################################################
 
@@ -1024,29 +913,6 @@ def get_shopify_insights():
         "best_selling_products": document.get("best_selling_products"),
     }
 
-# Chat endpoint remains the same
-# @app.post("/chat")
-# def chat_with_report(chat: ChatMessage, company: str = Query(None)):
-#     try:
-#         overall_report = overall_by_platform(platform=None, days=60, company=company)
-#         context = "Overall sentiment: " + ", ".join([f"{k}: {v}%" for k, v in overall_report.overall_sentiment.items()])
-#     except Exception:
-#         context = "No report data available."
-#     prompt = f"Report Context: {context}\nUser: {chat.message}\n"
-#     if chat.history:
-#         for h in chat.history:
-#             prompt += f"{h.get('role')}: {h.get('content')}\n"
-#     try:
-#         response = openai.ChatCompletion.create(
-#             model="gpt-4o",
-#             messages=[{"role": "user", "content": prompt}],
-#             temperature=0.7,
-#             max_tokens=250
-#         )
-#         reply = response.choices[0].message.content.strip()
-#         return {"session_id": chat.session_id, "reply": reply}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

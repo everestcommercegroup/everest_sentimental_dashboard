@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   ThumbsUp,
   ThumbsDown,
+  Calendar,
   Minus,
   ChevronRight,
   FolderHeart,
@@ -31,6 +32,49 @@ import { ResponsivePie } from '@nivo/pie';
 import { safeNumber, safeString, createSafeObject, createPieData } from './utils/chart-helpers';
 
 // Types
+
+// Monthly Report
+interface MonthlyReport {
+  time_period: string;
+  company: string;
+  company_id: string;
+  aggregated_data: {
+    positive: Array<{
+      _id: {
+        month: string;
+        sentiment: string;
+        category: string;
+      };
+      titles: string[];
+      count: number;
+    }>;
+    negative: Array<{
+      _id: {
+        month: string;
+        sentiment: string;
+        category: string;
+      };
+      titles: string[];
+      count: number;
+    }>;
+  };
+  positive_insight: {
+    key_strengths: string[];
+    best_practices_to_continue: string[];
+    actionable_recommendations: string[];
+  };
+  negative_insight: {
+    key_weaknesses: string[];
+    actionable_recommendations: string[];
+  };
+  overall_positive: number;
+  overall_negative: number;
+  overall_neutral: number;
+  total_reviews: number;
+  positive_insight_small: string[];
+  negative_insight_small: string[];
+}
+
 
 interface CategoryAnalysis {
   category: string;
@@ -59,23 +103,8 @@ interface OverallReport {
   last_updated: string;
 }
 
-interface MonthlyFeedbackItem {
-  month: string;
-  top_positive: Array<{
-    category: string;
-    sentiment: string; // e.g. "positive"
-    count: number;
-  }>;
-  top_negative: Array<{
-    category: string;
-    sentiment: string; // e.g. "negative"
-    count: number;
-  }>;
-}
 
-interface MonthlyFeedbackResponse {
-  data: MonthlyFeedbackItem[];
-}
+
 
 interface OverallDetailReport {
   overall_sentiment_detail: {
@@ -181,11 +210,50 @@ function MonthlyFeedbackTooltip({ active, payload, label }: any) {
 function App() {
 
 
+  // Monthly Report-
+
   const [selectedCompany, setSelectedCompany] = useState<string>('cook_and_pan');
-  const [monthlyFeedback, setMonthlyFeedback] = useState<MonthlyFeedbackItem[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const fetchMonthlyReport = useCallback(async () => {
+    try {
+      setMonthlyReportLoading(true);
+      setMonthlyReportError(null);
+  
+      // Use the already-declared selectedMonth
+      const [yearString, monthString] = selectedMonth.split('-');
+      const year = parseInt(yearString, 10);
+      const month = parseInt(monthString, 10);
+  
+      // Make a GET request to your monthly analysis endpoint with dynamic company
+      const response = await axios.get<MonthlyReport>(`${API_BASE_URL}/report/monthly_analysis`, {
+        params: {
+          company: selectedCompany, // dynamic value from CompanySelector
+          year,
+          month,
+        },
+      });
+  
+      setMonthlyReport(response.data);
+    } catch (err) {
+      console.error('Error fetching monthly report:', err);
+      setMonthlyReportError('Failed to fetch monthly report');
+    } finally {
+      setMonthlyReportLoading(false);
+    }
+  }, [selectedMonth, selectedCompany]);
+  
+
+  useEffect(() => {
+    fetchMonthlyReport();
+  }, [fetchMonthlyReport]);
+  
+  
+
+
   // Some new useState lines near your other states:
   const [selectedIssueReviews, setSelectedIssueReviews] = useState<any[]>([]);
   const [issueModalOpen, setIssueModalOpen] = useState(false);
+
 
   const [selectedEmotion, setSelectedEmotion] = useState<string | null>(null);
   const [categoryDetails, setCategoryDetails] = useState<DetailCategory | null>(null);
@@ -229,12 +297,16 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [showAllPositive, setShowAllPositive] = useState(false);
   const [showAllNegative, setShowAllNegative] = useState(false);
-  const [combinedTrendData, setCombinedTrendData] = useState<TrendDataWithFeedback[]>([]);
   const [subCategories, setSubCategories] = useState<TopFeedback[]>([]);
   const [showSubCategoryModal, setShowSubCategoryModal] = useState(false);
   const [parentCategoryClicked, setParentCategoryClicked] = useState<string | null>(null);
   const [parentSentiment, setParentSentiment] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  // Add these lines near your other state declarations (for example, just below selectedCategory)
+  const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null);
+  const [monthlyReportLoading, setMonthlyReportLoading] = useState(false);
+  const [monthlyReportError, setMonthlyReportError] = useState<string | null>(null);
+
 const [categoryAnalysis, setCategoryAnalysis] = useState<CategoryAnalysis | null>(null);
 const [expandedSection, setExpandedSection] = useState<'pros' | 'cons' | 'sentiment' | null>(null);
 const [categories] = useState<string[]>([
@@ -405,7 +477,6 @@ const CompanySelector = () => (
           .catch(() => ({ data: { pros: [], cons: [] } })),
         axios.get(`${API_BASE_URL}/report/risk_alerts`, { params })
           .catch(() => ({ data: { alerts: [] } })),
-        axios.get(`${API_BASE_URL}/report/monthly_feedback`, { params }) // new
 
       ]);
 
@@ -422,7 +493,6 @@ const CompanySelector = () => (
       setComparisonData(processComparisonData(comparisonRes.data?.platforms));
       setProsCons(createSafeObject(prosConsRes.data, { pros: [], cons: [] }));
       setRiskAlerts(riskAlertsRes.data?.alerts || []);
-      setMonthlyFeedback(monthlyFeedbackRes.data.data || []);
 
 
     } catch (err) {
@@ -449,23 +519,6 @@ const CompanySelector = () => (
   }, [fetchData]);
 
 
-  
-
-  useEffect(() => {
-    // Combine trendData and monthlyFeedback into one array
-    if (trendData.length && monthlyFeedback.length) {
-      const combined = trendData.map((td) => {
-        const matching = monthlyFeedback.find((m) => m.month === td.month);
-        return {
-          ...td,
-          top_positive: matching ? matching.top_positive : [],
-          top_negative: matching ? matching.top_negative : []
-        };
-      });
-      setCombinedTrendData(combined);
-    }
-  }, [trendData, monthlyFeedback]);
-  
   const fetchShopifyData = useCallback(async () => {
     try {
       setLoading(true);
@@ -577,6 +630,34 @@ const CompanySelector = () => (
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Monthly Report Section */}
+  {monthlyReportLoading ? (
+    <div className="flex items-center justify-center h-64">
+      <div className="text-xl text-gray-400">Loading monthly report...</div>
+    </div>
+  ) : monthlyReportError ? (
+    <div className="flex items-center justify-center h-64">
+      <div className="text-xl text-red-400">{monthlyReportError}</div>
+    </div>
+  ) : monthlyReport ? (
+    <div className="mb-8">
+      <h2 className="text-2xl font-bold mb-4">Monthly Report for {selectedCompany} - {selectedMonth}</h2>
+      {/* Render your monthly report details as needed. For example: */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+          <h3 className="text-lg font-semibold">Total Reviews</h3>
+          <p className="text-3xl font-bold">{monthlyReport.total_reviews.toLocaleString()}</p>
+        </div>
+        <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+          <h3 className="text-lg font-semibold">Overall Positive</h3>
+          <p className="text-3xl font-bold">{monthlyReport.overall_positive}%</p>
+        </div>
+        {/* Add additional cards for overall_negative, overall_neutral, etc., as needed */}
+      </div>
+    </div>
+  ) : null}
+
   
         {/* Sentiment and Detail Counts as cards with emoticons */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -719,40 +800,7 @@ const CompanySelector = () => (
     );
   };
   
-  // Emotional Distribution Component
-  // const EmotionalDistribution = () => (
-  //   <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 mb-8">
-  //     <h2 className="text-xl font-semibold mb-4">Emotional Distribution</h2>
-  //     <div className="h-64">
-  //       <ResponsiveContainer width="100%" height="100%">
-  //         <PieChart>
-  //           <Pie
-  //             data={emotionalChartData}
-  //             dataKey="value"
-  //             nameKey="emotion"
-  //             cx="50%"
-  //             cy="50%"
-  //             outerRadius={80}
-  //             label
-  //           >
-  //             {emotionalChartData.map((entry, index) => (
-  //               <Cell key={`cell-${index}`} fill={entry.color} />
-  //             ))}
-  //           </Pie>
-  //           <Tooltip
-  //             contentStyle={{
-  //               backgroundColor: 'rgba(0,0,0,0.8)',
-  //               border: '1px solid rgba(255,255,255,0.1)',
-  //               borderRadius: '8px'
-  //             }}
-  //             formatter={(value: number) => [`${value.toFixed(1)}%`, 'Percentage']}
-  //           />
-  //           <Legend />
-  //         </PieChart>
-  //       </ResponsiveContainer>
-  //     </div>
-  //   </div>
-  // );
+
   const fetchCategoryDetails = useCallback(async (emotion: string) => {
     try {
       const params = {
@@ -857,82 +905,7 @@ const CompanySelector = () => (
     </button>
   ))}
   
-  // Example: a new block or tab
-// function MonthlyFeedback({ monthlyFeedback }: MonthlyFeedbackProps) {
-//     // If no data, show a placeholder
-//     if (!monthlyFeedback.length) {
-//       return <p className="text-gray-400">No monthly feedback data</p>;
-//     }
-  
-//     return (
-//       <div className="space-y-6">
-//         <h2 className="text-xl font-semibold text-white mb-4">
-//           Monthly Top 3 Strengths &amp; Critical Feedback
-//         </h2>
-  
-//         {monthlyFeedback.map((item) => (
-//           <div
-//             key={item.month}
-//             className="bg-white/5 p-4 rounded-md border border-white/10 mb-4"
-//           >
-//             <h3 className="text-lg font-bold text-white mb-4">
-//               {item.month}
-//             </h3>
-  
-//             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-//               {/* Top Positive Categories */}
-//               <div>
-//                 <h4 className="text-md font-semibold text-green-400 mb-2">
-//                   Top Positive
-//                 </h4>
-//                 {item.top_positive.length > 0 ? (
-//                   item.top_positive.map((pos, i) => (
-//                     <div
-//                       key={i}
-//                       className="p-3 mb-2 bg-green-500/5 rounded-lg border border-green-500/10"
-//                     >
-//                       <p className="text-lg text-gray-200 font-semibold">
-//                         {pos.category}
-//                         <span className="ml-2 text-sm text-gray-400">
-//                           ({pos.count} mentions)
-//                         </span>
-//                       </p>
-//                     </div>
-//                   ))
-//                 ) : (
-//                   <p className="text-gray-400 text-sm">No positive feedback.</p>
-//                 )}
-//               </div>
-  
-//               {/* Top Negative Categories */}
-//               <div>
-//                 <h4 className="text-md font-semibold text-red-400 mb-2">
-//                   Top Negative
-//                 </h4>
-//                 {item.top_negative.length > 0 ? (
-//                   item.top_negative.map((neg, i) => (
-//                     <div
-//                       key={i}
-//                       className="p-3 mb-2 bg-red-500/5 rounded-lg border border-red-500/10"
-//                     >
-//                       <p className="text-lg text-gray-200 font-semibold">
-//                         {neg.category}
-//                         <span className="ml-2 text-sm text-gray-400">
-//                           ({neg.count} mentions)
-//                         </span>
-//                       </p>
-//                     </div>
-//                   ))
-//                 ) : (
-//                   <p className="text-gray-400 text-sm">No negative feedback.</p>
-//                 )}
-//               </div>
-//             </div>
-//           </div>
-//         ))}
-//       </div>
-//     );
-//   }
+ 
 
 interface FeedbackItem {
   category: string;
@@ -953,94 +926,8 @@ interface MonthlyFeedbackProps {
   monthlyFeedback: MonthlyFeedbackItem[];
 }
 
-function MonthlyFeedbackCards({ data }: Props) {
-  // Sort data descending so newest month is first
-  const sortedData = [...data].sort((a, b) => b.month.localeCompare(a.month));
 
-  // Show only last 12 months by default
-  const [showAll, setShowAll] = useState(false);
-  const displayedData = showAll ? sortedData : sortedData.slice(0, 12);
 
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-white mb-6">
-        Monthly Top 3 Strengths & Critical Feedback
-      </h2>
-
-      {displayedData.map((item) => (
-        <div
-          key={item.month}
-          className="bg-white/5 p-6 rounded-lg border border-white/10"
-        >
-          <h3 className="text-2xl font-bold text-white mb-4">{item.month}</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Top Positive Categories */}
-            <div>
-              <h4 className="text-xl font-semibold text-green-400 mb-3">
-                Top 3 Strengths
-              </h4>
-              {item.top_positive.length > 0 ? (
-                item.top_positive.map((pos, i) => (
-                  <div
-                    key={i}
-                    className="p-4 mb-3 bg-green-500/5 rounded-lg border border-green-500/10"
-                  >
-                    <p className="text-2xl text-white font-bold">
-                      {pos.category}
-                      <span className="ml-3 text-lg text-gray-300">
-                      ({pos.count} mentions)
-                      </span>
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <p className="text-lg text-gray-400">
-                  No positive feedback.
-                </p>
-              )}
-            </div>
-            {/* Top Negative Categories */}
-            <div>
-              <h4 className="text-xl font-semibold text-red-400 mb-3">
-                Top 3 Critical Feedback
-              </h4>
-              {item.top_negative.length > 0 ? (
-                item.top_negative.map((neg, i) => (
-                  <div
-                    key={i}
-                    className="p-4 mb-3 bg-red-500/5 rounded-lg border border-red-500/10"
-                  >
-                    <p className="text-2xl text-white font-bold">
-                      {neg.category}
-                      <span className="ml-3 text-lg text-gray-300">
-                      ({neg.count} mentions)
-                      </span>
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <p className="text-lg text-gray-400">
-                  No negative feedback.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      ))}
-
-      {sortedData.length > 12 && (
-        <div className="text-center">
-          <button
-            onClick={() => setShowAll(!showAll)}
-            className="px-4 py-2 bg-white/10 rounded-lg text-gray-300 hover:bg-white/20 transition"
-          >
-            {showAll ? "Show Fewer Months" : "Show Older Months"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 console.log("Shopify data:", shopifyData);
 
@@ -1117,7 +1004,66 @@ const StatsOverview = ({ overallData }) => {
     return (
       <>
 
-{activeTab !== 'shopify' && <StatsOverview overallData={overallData} />}
+{activeTab === 'monthly' && (
+  <div className="space-y-6">
+    {/* A small date picker for selectedMonth, if you want: */}
+    <div className="flex items-center gap-2">
+      <label className="text-gray-300">Month:</label>
+      <input
+        type="month"
+        value={selectedMonth}
+        onChange={(e) => setSelectedMonth(e.target.value)}
+        className="bg-black text-white border border-white/20 rounded px-2 py-1"
+      />
+    </div>
+
+    {monthlyReportLoading ? (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-xl text-gray-400">Loading monthly report...</div>
+      </div>
+    ) : monthlyReportError ? (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-xl text-red-400">{monthlyReportError}</div>
+      </div>
+    ) : monthlyReport ? (
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold mb-4">
+          Monthly Report for {selectedCompany} - {selectedMonth}
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+            <h3 className="text-lg font-semibold">Total Reviews</h3>
+            <p className="text-3xl font-bold">
+              {monthlyReport.total_reviews.toLocaleString()}
+            </p>
+          </div>
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+            <h3 className="text-lg font-semibold">Overall Positive</h3>
+            <p className="text-3xl font-bold">
+              {monthlyReport.overall_positive}%
+            </p>
+          </div>
+          {/* Add more cards for overall_negative, overall_neutral, etc. */}
+        </div>
+
+        {/* Example: show some insights or aggregated_data */}
+        <div className="mt-6">
+          <h3 className="text-xl font-semibold">Positive Insights</h3>
+          <ul className="list-disc ml-5 text-gray-300 mt-2">
+            {monthlyReport.positive_insight.key_strengths.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    ) : null}
+  </div>
+)}
+
+
+{activeTab !== 'shopify' && activeTab !== 'monthly' && (
+  <StatsOverview overallData={overallData} />
+)}
 
 
 
@@ -1327,19 +1273,15 @@ const StatsOverview = ({ overallData }) => {
   </div>
 )}
 
-{activeTab === 'monthlyFeedback' && (
-  <MonthlyFeedbackCards data={monthlyFeedback} />
-)}
+
 
 
 
       
-              {/* <EmotionalStats
-        emotionalData={emotionalData}
-        onEmotionClick={handleEmotionClick}
-      /> */}
+
       
-      {(activeTab !== 'categories' && activeTab !== 'monthlyFeedback' && activeTab!= 'shopify') && (
+  <>
+  {activeTab !== 'shopify' && activeTab !== 'monthly' && (
   <>
     <EmotionalStats
       emotionalData={emotionalData}
@@ -1350,6 +1292,9 @@ const StatsOverview = ({ overallData }) => {
     </div>
   </>
 )}
+
+  </>
+
 
       {activeTab === 'categories' && (
         <div className="space-y-6">
@@ -1427,6 +1372,7 @@ const StatsOverview = ({ overallData }) => {
   </div>
 )}
 
+
 {activeTab === 'overview' && (
         <>
 <div className="grid grid-cols-1 md:grid-cols-1 gap-6 mb-8">
@@ -1434,7 +1380,7 @@ const StatsOverview = ({ overallData }) => {
 <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 h-96 w-full max-w-full">
   <h2 className="text-xl font-semibold mb-4">Sentiment Trends</h2>
   <ResponsiveContainer width="100%" height={350}>
-  <LineChart data={combinedTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
+  <LineChart data={trendData} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
     <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" />
     <YAxis stroke="rgba(255,255,255,0.5)" />
@@ -1687,110 +1633,131 @@ const StatsOverview = ({ overallData }) => {
           <CircleSlash className="w-6 h-6" />
         </div>
         <nav className="flex flex-col gap-4">
-        <button
-  onClick={() => setActiveTab('overview')}
-  title="Overall Sentiment Analysis"
-  className={`p-3 rounded-lg transition-colors duration-200 ${
-    activeTab === 'overview'
-      ? 'bg-white/10 text-white'
-      : 'text-gray-400 hover:bg-white/5 hover:text-white'
-  }`}
->
-  <LineChartIcon className="w-6 h-6" />
-</button>
-
-{/* <button
-  onClick={() => setActiveTab('insights')}
-  title="Pros / Cons"
-  className={`p-3 rounded-lg transition-colors duration-200 ${
-    activeTab === 'insights'
-      ? 'bg-white/10 text-white'
-      : 'text-gray-400 hover:bg-white/5 hover:text-white'
-  }`}
->
-  <PieChartIcon className="w-6 h-6" />
-</button> */}
-
-{/* <button
-  onClick={() => setActiveTab('comparison')}
-  title="Platform Comparison"
-  className={`p-3 rounded-lg transition-colors duration-200 ${
-    activeTab === 'comparison'
-      ? 'bg-white/10 text-white'
-      : 'text-gray-400 hover:bg-white/5 hover:text-white'
-  }`}
->
-  <BarChartIcon className="w-6 h-6" />
-</button> */}
-
-<button
-  onClick={() => setActiveTab('categories')}
-  title="Category Analysis"
-  className={`p-3 rounded-lg transition-colors duration-200 ${
-    activeTab === 'categories'
-      ? 'bg-white/10 text-white'
-      : 'text-gray-400 hover:bg-white/5 hover:text-white'
-  }`}
->
-  <FolderHeart className="w-6 h-6" />
-</button>
-
-<button
-  onClick={() => setActiveTab('monthlyFeedback')}
-  title="Monthly Sementic Analysis"
-  className={`p-3 rounded-lg transition-colors duration-200 ${
-    activeTab === 'monthlyFeedback'
-      ? 'bg-white/10 text-white'
-      : 'text-gray-400 hover:bg-white/5 hover:text-white'
-  }`}
->
-  <ListChecks className="w-6 h-6" />
-</button>
-<button
-    onClick={() => setActiveTab('shopify')}
-    title="Shopify Analytics"
-    className={`p-3 rounded-lg transition-colors duration-200 ${
-      activeTab === 'shopify'
-        ? 'bg-white/10 text-white'
-        : 'text-gray-400 hover:bg-white/5 hover:text-white'
-    }`}
-  >
-    <ShoppingBag className="w-6 h-6" />
-  </button>
-
-
+          <button
+            onClick={() => setActiveTab('overview')}
+            title="Overall Sentiment Analysis"
+            className={`p-3 rounded-lg transition-colors duration-200 ${
+              activeTab === 'overview'
+                ? 'bg-white/10 text-white'
+                : 'text-gray-400 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <LineChartIcon className="w-6 h-6" />
+          </button>
+          <button
+            onClick={() => setActiveTab('categories')}
+            title="Category Analysis"
+            className={`p-3 rounded-lg transition-colors duration-200 ${
+              activeTab === 'categories'
+                ? 'bg-white/10 text-white'
+                : 'text-gray-400 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <FolderHeart className="w-6 h-6" />
+          </button>
+          <button
+            onClick={() => setActiveTab('shopify')}
+            title="Shopify Analytics"
+            className={`p-3 rounded-lg transition-colors duration-200 ${
+              activeTab === 'shopify'
+                ? 'bg-white/10 text-white'
+                : 'text-gray-400 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <ShoppingBag className="w-6 h-6" />
+          </button>
+          <button
+            onClick={() => setActiveTab('monthly')}
+            title="Monthly Analysis"
+            className={`p-3 rounded-lg transition-colors duration-200 ${
+              activeTab === 'monthly'
+                ? 'bg-white/10 text-white'
+                : 'text-gray-400 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <Calendar className="w-6 h-6" />
+          </button>
         </nav>
       </div>
-
+  
       {/* Main Content */}
       <div className="ml-20 p-8">
-      <header className="mb-8 flex items-center justify-between">
-
+        <header className="mb-8 flex items-center justify-between">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
             Peak by Everest
           </h1>
           <p className="text-gray-400">Real-time customer feedback analysis</p>
         </header>
-
+  
         {/* Filters */}
         <div className="space-y-4 mb-8">
-        <CompanySelector />  
-
-          <PlatformSelector />
-          
+          <CompanySelector />
+          {activeTab !== 'shopify' && activeTab !== 'monthly' && (
+            <PlatformSelector />
+          )}
         </div>
-
-
-
-
-
+  
+        {/* Render Monthly Report only when Monthly tab is active */}
+        {/* {activeTab === 'monthly' && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-2">
+              <label className="text-gray-300">Month:</label>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="bg-black text-white border border-white/20 rounded px-2 py-1"
+              />
+            </div>
+            {monthlyReportLoading ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="text-xl text-gray-400">Loading monthly report...</div>
+              </div>
+            ) : monthlyReportError ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="text-xl text-red-400">{monthlyReportError}</div>
+              </div>
+            ) : monthlyReport ? (
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold mb-4">
+                  Monthly Report for {selectedCompany} - {selectedMonth}
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+                    <h3 className="text-lg font-semibold">Total Reviews</h3>
+                    <p className="text-3xl font-bold">
+                      {monthlyReport.total_reviews.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+                    <h3 className="text-lg font-semibold">Overall Positive</h3>
+                    <p className="text-3xl font-bold">{monthlyReport.overall_positive}%</p>
+                  </div>
+                </div>
+                <div className="mt-6">
+                  <h3 className="text-xl font-semibold">Positive Insights</h3>
+                  <ul className="list-disc ml-5 text-gray-300 mt-2">
+                    {monthlyReport.positive_insight.key_strengths.map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )} */}
+  
+        {/* Render Category Analysis only when Categories tab is active */}
         {activeTab === 'categories' && (
-        <h2 className="text-3xl font-bold text-white mb-4">
-          General Category Overview Analysis
-        </h2>
-      )}
-
-        {/* Dynamic Content */}
+          <div className="space-y-6">
+            <h2 className="text-3xl font-bold text-white mb-4">
+              General Category Overview Analysis
+            </h2>
+            {/* Additional category analysis content (e.g., buttons, CategoryAnalysisSection) goes here */}
+          </div>
+        )}
+  
+        {/* Render dynamic content for other tabs */}
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="text-xl text-gray-400">Loading...</div>
@@ -1802,6 +1769,21 @@ const StatsOverview = ({ overallData }) => {
         ) : (
           renderContent()
         )}
+  
+        {/* Modals */}
+        {issueModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            {/* ... Issue modal content ... */}
+          </div>
+        )}
+        {showSubCategoryModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            {/* ... Subcategory modal content ... */}
+          </div>
+        )}
+  
+        {/* Emotional Analysis (can be rendered outside the main content if desired) */}
+
       </div>
     </div>
   );

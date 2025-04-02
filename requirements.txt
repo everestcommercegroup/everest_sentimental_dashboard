@@ -2,5 +2,5 @@ fastapi
 uvicorn
 pymongo
 openai==0.28
-
+python-dateutil
 python-dotenv

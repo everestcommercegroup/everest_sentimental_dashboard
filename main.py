@@ -3,19 +3,29 @@ import datetime
 from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from pymongo import MongoClient
+from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import PyMongoError
 from dotenv import load_dotenv
-import openai
 from bson.objectid import ObjectId
-from typing import List, Dict, Any,Optional
-import datetime
+from typing import List, Dict, Any, Optional
+from datetime import datetime,timedelta
+
+from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from passlib.context import CryptContext
+import jwt
+import os
+from motor.motor_asyncio import AsyncIOMotorClient
+
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "ecommerce_sentiment")
+# For OpenAI, etc.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_openai_api_key")
-openai.api_key = OPENAI_API_KEY
+# (Assuming you use OpenAI API key somewhere in your code)
+# openai.api_key = OPENAI_API_KEY
 
 app = FastAPI(title="Customer Feedback Dashboard Backend")
 
@@ -28,25 +38,112 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = MongoClient(MONGO_URI)
+# Use Motor's AsyncIOMotorClient instead of synchronous MongoClient
+client = AsyncIOMotorClient(MONGO_URI)
 db = client[DB_NAME]
 reviews_collection = db["sentimental_analysis"]
 monthly_reports_collection = db["sentimental_monthly_reports"]
+users_collection = db["sentimental_dashboard_users"]
+
+
+# # JWT & Password Setup
+SECRET_KEY = os.getenv("SECRET_KEY", "your_secret_key")  # Update for production
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/signin")
+
+# Pydantic model for user input
+class UserIn(BaseModel):
+    email: str
+    password: str
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+# Sign-Up Endpoint (only allows emails ending with "@joineverestgroup.com")
+@app.post("/api/signup")
+async def signup(user_in: UserIn):
+    required_domain = "joineverestgroup.com"
+    if not user_in.email.endswith(f"@{required_domain}"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only {required_domain} domain emails can register"
+        )
+    # Check if user already exists
+    existing_user = await users_collection.find_one({"email": user_in.email})
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    # Store the new user with hashed password
+    hashed_password = get_password_hash(user_in.password)
+    user_doc = {
+        "email": user_in.email,
+        "hashed_password": hashed_password,
+        "created_at": datetime.utcnow()
+    }
+    result = await users_collection.insert_one(user_doc)
+    
+    access_token = create_access_token(
+        data={"sub": user_in.email},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# Sign-In Endpoint
+@app.post("/api/signin")
+async def signin(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = await users_collection.find_one({"email": form_data.username})
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect email or password"
+        )
+    access_token = create_access_token(
+        data={"sub": user["email"]},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# Verify Token Endpoint
+@app.get("/api/verify")
+async def verify_token(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return {"email": email}
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 # --- Pydantic Models ---
 class OverallReport(BaseModel):
-    overall_sentiment: dict       # stores percentages { "positive": 80.4, ... }
+    overall_sentiment: dict       # e.g. { "positive": 80.4, ... }
     total_reviews: int
-    last_updated: datetime.datetime
-    sentiment_counts: Dict[str, int] = {}  # NEW: store raw counts { "positive": 120, ... }
-
+    last_updated: datetime
+    sentiment_counts: Dict[str, int] = {}
 
 class DetailedReport(BaseModel):
     overall_sentiment: dict
     overall_sentiment_detail: dict
     overall_sentimental_category: dict
     total_reviews: int
-    last_updated: datetime.datetime
+    last_updated: datetime
 
 class TrendReport(BaseModel):
     trends: list  # List of dicts: { "month": "YYYY-MM", "positive": X, "negative": Y, "neutral": Z }
@@ -55,7 +152,7 @@ class NegativeTrendReport(BaseModel):
     trends: list  # List of dicts: { "month": "YYYY-MM", "negative": X }
 
 class PlatformComparisonReport(BaseModel):
-    comparison: dict  # e.g., { "gorgias": {"positive": ..., "negative": ..., "neutral": ...}, ... }
+    comparison: dict
 
 class RiskAlert(BaseModel):
     alert: str
@@ -76,7 +173,7 @@ class ChatMessage(BaseModel):
 # --- Helper Functions ---
 def parse_date(date_str: str):
     try:
-        return datetime.datetime.fromisoformat(date_str)
+        return datetime.fromisoformat(date_str)
     except Exception:
         return None
 
@@ -94,49 +191,48 @@ def build_time_filter(start_date: str = None, end_date: str = None):
 
 def common_match(platform: str = None, start_date: str = None, end_date: str = None, company: str = None):
     match = {}
-    # If platform is provided
     if platform:
         match["platform"] = platform
-    # If company is provided, add it to the filter
     if company:
         match["company"] = company
-    # If time filter is provided
     time_filter = build_time_filter(start_date, end_date)
     if time_filter:
         match["time_period"] = time_filter
     return match
 
 def humanize_snake_case(value: str) -> str:
-    """
-    Convert snake_case text to capitalized words, e.g.
-    'missing_sheet_in_partial_delivery' -> 'Missing Sheet In Partial Delivery'.
-    """
-    # Replace underscores with spaces
     spaced = value.replace("_", " ")
-    # Capitalize each word
     return spaced.title()
 
+def convert_object_ids(obj):
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, list):
+        return [convert_object_ids(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_object_ids(value) for key, value in obj.items()}
+    else:
+        return obj
 
-# 1) Overall Sentiment Distribution (platform wise)
-
-
-
+############################################
+# 1) Overall Sentiment Distribution Endpoint
+############################################
 @app.get("/report/overall_by_platform", response_model=OverallReport)
-def overall_by_platform(
+async def overall_by_platform(
     platform: str = Query(None),
-    days: Optional[int] = Query(None),  # Optional; later you can update this to apply a date range.
+    days: Optional[int] = Query(None),
     company: str = Query(None)
 ):
     if days is not None:
-        now = datetime.datetime.utcnow()
+        now = datetime.utcnow()
         start = now - datetime.timedelta(days=days)
         start_str, end_str = start.isoformat(), now.isoformat()
     else:
-        start_str, end_str = None, None  # No date filtering for overall analysis.
-    
+        start_str, end_str = None, None
+
     base_match = common_match(platform, start_str, end_str, company)
     
-    total = reviews_collection.count_documents(base_match)
+    total = await reviews_collection.count_documents(base_match)
     if total == 0:
         raise HTTPException(status_code=404, detail="No review data found")
     
@@ -144,8 +240,7 @@ def overall_by_platform(
         {"$match": {**base_match, "overall_sentiment": {"$ne": ""}}},
         {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
     ]
-
-    results = list(reviews_collection.aggregate(pipeline))
+    results = await reviews_collection.aggregate(pipeline).to_list(length=None)
     
     overall_sentiment = {
         doc["_id"]: round((doc["count"] / total) * 100, 2)
@@ -155,38 +250,36 @@ def overall_by_platform(
         doc["_id"]: doc["count"]
         for doc in results
     }
-
-    latest_doc = reviews_collection.find_one(base_match, sort=[("time_period", -1)])
-    last_updated = latest_doc.get("time_period", datetime.datetime.utcnow())
+    latest_doc = await reviews_collection.find_one(base_match, sort=[("time_period", -1)])
+    last_updated = latest_doc.get("time_period", datetime.utcnow()) if latest_doc else datetime.utcnow()
 
     return {
-        "overall_sentiment": overall_sentiment,    # e.g. { "positive": 80.4, ... }
+        "overall_sentiment": overall_sentiment,
         "total_reviews": total,
         "last_updated": last_updated,
-        "sentiment_counts": sentiment_counts       # e.g. { "positive": 250, ... }
+        "sentiment_counts": sentiment_counts
     }
 
-
-# 2) Line chart for overall sentiment trends (monthly aggregation)
-from typing import Optional
-
+############################################
+# 2) Sentiment Trends Endpoint
+############################################
 @app.get("/report/trends", response_model=TrendReport)
-def report_trends(
+async def report_trends(
     platform: str = Query(None),
-    days: Optional[int] = Query(None),  # Optional; if not provided, overall data is returned.
+    days: Optional[int] = Query(None),
     company: str = Query(None)
 ):
     try:
         if days is not None:
-            now = datetime.datetime.utcnow()
+            now = datetime.utcnow()
             start = now - datetime.timedelta(days=days)
             start_str, end_str = start.isoformat(), now.isoformat()
         else:
-            start_str, end_str = None, None  # Overall data (no date filtering)
-        
+            start_str, end_str = None, None
+
         match = common_match(platform, start_str, end_str, company)
         match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
-        
+
         pipeline = [
             {"$match": match},
             {"$project": {
@@ -204,7 +297,7 @@ def report_trends(
             {"$sort": {"_id": 1}}
         ]
         
-        results = list(reviews_collection.aggregate(pipeline))
+        results = await reviews_collection.aggregate(pipeline).to_list(length=None)
         trends = []
         for doc in results:
             month = doc["_id"]
@@ -217,114 +310,88 @@ def report_trends(
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# 2.1 to get report monthly feedback
-from typing import List
-from pydantic import BaseModel
-
+############################################
+# 2.1) Monthly Feedback Endpoint
+############################################
 class MonthlyFeedbackItem(BaseModel):
     month: str
-    top_positive: List[dict]   # e.g. [ { "category": "XYZ", "count": 12 }, ... ]
+    top_positive: List[dict]
     top_negative: List[dict]
 
 class MonthlyFeedbackResponse(BaseModel):
     data: List[MonthlyFeedbackItem]
 
 @app.get("/report/monthly_feedback", response_model=MonthlyFeedbackResponse)
-def monthly_feedback(
+async def monthly_feedback(
     platform: Optional[str] = None,
     days: Optional[int] = None,
     company: Optional[str] = None
 ):
-    # 1) Build time range if 'days' is given
     if days is not None:
-        now = datetime.datetime.utcnow()
+        now = datetime.utcnow()
         start = now - datetime.timedelta(days=days)
         start_str, end_str = start.isoformat(), now.isoformat()
     else:
         start_str, end_str = None, None
 
-    # 2) Build a base match using your existing 'common_match' function
     base_match = common_match(platform, start_str, end_str, company)
-    # We only care about positive/negative docs with a valid time_period
     base_match["overall_sentiment"] = {"$in": ["positive", "negative"]}
     base_match["time_period"] = {"$exists": True, "$ne": None}
 
-    # 3) Create the aggregation pipeline
     pipeline = [
         {"$match": base_match},
-        {
-            "$project": {
-                "year_month": {
-                    "$dateToString": {"format": "%Y-%m", "date": "$time_period"}
-                },
-                "category": "$overall_sentimental_category",
-                "sentiment": "$overall_sentiment"
-            }
-        },
-        {
-            "$group": {
-                "_id": {
-                    "month": "$year_month",
-                    "category": "$category",
-                    "sentiment": "$sentiment"
-                },
-                "count": {"$sum": 1}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$_id.month",
-                "categoryData": {
-                    "$push": {
-                        "category": "$_id.category",
-                        "sentiment": "$_id.sentiment",
-                        "count": "$count"
-                    }
-                }
-            }
-        },
+        {"$project": {
+            "year_month": {"$dateToString": {"format": "%Y-%m", "date": "$time_period"}},
+            "category": "$overall_sentimental_category",
+            "sentiment": "$overall_sentiment"
+        }},
+        {"$group": {
+            "_id": {"month": "$year_month", "category": "$category", "sentiment": "$sentiment"},
+            "count": {"$sum": 1}
+        }},
+        {"$group": {
+            "_id": "$_id.month",
+            "categoryData": {"$push": {
+                "category": "$_id.category",
+                "sentiment": "$_id.sentiment",
+                "count": "$count"
+            }}
+        }},
         {"$sort": {"_id": 1}}
     ]
+    results = await reviews_collection.aggregate(pipeline).to_list(length=None)
 
-    # 4) Run the pipeline
-    results = list(reviews_collection.aggregate(pipeline))
-
-    # 5) Build the output structure
     output = []
     for doc in results:
         month = doc["_id"]
-        category_data = doc["categoryData"]  # list of {category, sentiment, count}
+        category_data = doc["categoryData"]
 
-        # Separate positives & negatives
         positives = [d for d in category_data if d["sentiment"] == "positive"]
         negatives = [d for d in category_data if d["sentiment"] == "negative"]
 
-        # Sort descending by count and keep top 3 each
         positives.sort(key=lambda x: x["count"], reverse=True)
         negatives.sort(key=lambda x: x["count"], reverse=True)
         top_pos = positives[:3]
         top_neg = negatives[:3]
 
-        # Humanize snake_case categories
         for item in top_pos:
             item["category"] = humanize_snake_case(item["category"])
         for item in top_neg:
             item["category"] = humanize_snake_case(item["category"])
 
         output.append({
-            "month": month,          # e.g. "2025-03"
-            "top_positive": top_pos, # e.g. [{"category": "Price Dissatisfaction", "sentiment": "positive", "count": 3}, ...]
+            "month": month,
+            "top_positive": top_pos,
             "top_negative": top_neg
         })
 
-    # 6) Return the final data
     return {"data": output}
 
-
-# 3) Average negative trends and monthly spike analysis (platform & overall)
+############################################
+# 3) Negative Trends Endpoint
+############################################
 @app.get("/report/negative_trends", response_model=NegativeTrendReport)
-def negative_trends(
+async def negative_trends(
     platform: str = Query(None),
     start_date: str = Query(None),
     end_date: str = Query(None),
@@ -335,26 +402,21 @@ def negative_trends(
         match["overall_sentiment"] = "negative"
         pipeline = [
             {"$match": match},
-            {"$project": {
-                "year_month": {"$dateToString": {"format": "%Y-%m", "date": "$time_period"}}
-            }},
-            {"$group": {
-                "_id": "$year_month",
-                "negative_count": {"$sum": 1}
-            }},
+            {"$project": {"year_month": {"$dateToString": {"format": "%Y-%m", "date": "$time_period"}}}},
+            {"$group": {"_id": "$year_month", "negative_count": {"$sum": 1}}},
             {"$sort": {"_id": 1}}
         ]
-        results = list(reviews_collection.aggregate(pipeline))
-        trends = []
-        for doc in results:
-            trends.append({"month": doc["_id"], "negative": doc["negative_count"]})
+        results = await reviews_collection.aggregate(pipeline).to_list(length=None)
+        trends = [{"month": doc["_id"], "negative": doc["negative_count"]} for doc in results]
         return NegativeTrendReport(trends=trends)
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+############################################
+# 4) Category Table for Pros/Cons Endpoint
+############################################
 @app.get("/report/category_table")
-def category_table_pros_cons(
+async def category_table_pros_cons(
     platform: str = Query(None),
     sentiment: str = Query(None),
     limit: int = Query(10),
@@ -374,75 +436,58 @@ def category_table_pros_cons(
             {"$sort": {"count": -1}},
             {"$limit": limit}
         ]
-        results = list(reviews_collection.aggregate(pipeline))
-
-        # Here we transform snake_case -> human-friendly
+        results = await reviews_collection.aggregate(pipeline).to_list(length=None)
         table = []
         for doc in results:
-            raw_category = doc["_id"]  # e.g. "damaged_gas_solution"
+            raw_category = doc["_id"]
             count = doc["count"]
-            
-            # Convert to "Damaged Gas Solution"
             human_category = humanize_snake_case(raw_category)
-
-            table.append({
-                "category": human_category,
-                "count": count
-            })
-
+            table.append({"category": human_category, "count": count})
         return {"table": table}
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-# 5.1 for fetching overall_sementic categories from category
+
+############################################
+# 5.1) Overall Sentimental Category Pros/Cons
+############################################
 @app.get("/report/overall_sentimental_category_pros_cons")
-def overall_sentimental_category_pros_cons(
+async def overall_sentimental_category_pros_cons(
     parent_category: str = Query(..., description="The parent category to filter on (e.g., 'Returns & Refunds')"),
     sentiment: str = Query(None, description="Sentiment to filter on (e.g., 'positive' or 'negative')"),
     company: str = Query(None),
     limit: int = Query(5)
 ):
     try:
-        # Build a simple match filter without platform or time filters.
         match = {}
         if company:
             match["company"] = company
-        
-        # Directly match the parent_category and ensure overall_sentimental_category is non-empty.
         match["category"] = parent_category
         match["overall_sentimental_category"] = {"$ne": ""}
-        
-        # If sentiment is provided, add it to the filter.
         if sentiment:
             match["overall_sentiment"] = sentiment
         
         pipeline = [
             {"$match": match},
-            {"$group": {
-                "_id": "$overall_sentimental_category",
-                "count": {"$sum": 1}
-            }},
+            {"$group": {"_id": "$overall_sentimental_category", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}},
             {"$limit": limit}
         ]
-        results = list(reviews_collection.aggregate(pipeline))
-        
+        results = await reviews_collection.aggregate(pipeline).to_list(length=None)
         table = []
         for doc in results:
             table.append({
                 "category": humanize_snake_case(doc["_id"]),
                 "count": doc["count"]
             })
-        
         return {"table": table}
-    
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# 5.2
+############################################
+# 5.2) Issue Details Endpoint
+############################################
 @app.get("/report/issue_details")
-def issue_details(
+async def issue_details(
     category: str = Query(...), 
     sentiment: str = Query(None),
     company: str = Query(None),
@@ -453,31 +498,26 @@ def issue_details(
         if company:
             match["company"] = company
 
-        # Convert the provided category to snake_case
         snake_case_cat = category.lower().replace(" ", "_")
         match["overall_sentimental_category"] = snake_case_cat
-        
-        # If sentiment is provided, filter by it
         if sentiment:
             match["overall_sentiment"] = sentiment
 
-        docs = list(reviews_collection.find(match).limit(limit))
-        
-        # Convert ObjectId values to strings recursively.
+        docs_cursor = reviews_collection.find(match).limit(limit)
+        docs = await docs_cursor.to_list(length=limit)
         docs = [convert_object_ids(doc) for doc in docs]
         for d in docs:
             if "time_period" in d and d["time_period"]:
-                # Format datetime as "YYYY-MM-DD HH:MM:SS"
                 d["time_period"] = d["time_period"].strftime("%Y-%m-%d %H:%M:%S")
-        
         return {"reviews": docs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# 6) Filter control for time period for overall sentiment, detail, and category
+############################################
+# 6) Detailed Report Endpoint
+############################################
 @app.get("/report/detailed", response_model=DetailedReport)
-def detailed_report(
+async def detailed_report(
     platform: str = Query(None),
     start_date: str = Query(None),
     end_date: str = Query(None),
@@ -487,31 +527,34 @@ def detailed_report(
     try:
         base_match = common_match(platform, start_date, end_date, company)
         base_match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
-        total = reviews_collection.count_documents(base_match)
+        total = await reviews_collection.count_documents(base_match)
         if total == 0:
             raise HTTPException(status_code=404, detail="No review data found")
+        
         pipeline_overall = [
             {"$match": base_match},
             {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
         ]
-        overall_results = list(reviews_collection.aggregate(pipeline_overall))
+        overall_results = await reviews_collection.aggregate(pipeline_overall).to_list(length=None)
         overall = {doc["_id"]: round((doc["count"] / total) * 100, 2) for doc in overall_results}
+        
         pipeline_detail = [
             {"$match": {**base_match, "overall_sentiment_detail": {"$ne": ""}}},
             {"$group": {"_id": "$overall_sentiment_detail", "count": {"$sum": 1}}}
         ]
-        detail_results = list(reviews_collection.aggregate(pipeline_detail))
+        detail_results = await reviews_collection.aggregate(pipeline_detail).to_list(length=None)
         detail = {doc["_id"]: round((doc["count"] / total) * 100, 2) for doc in detail_results}
+        
         pipeline_category = [
             {"$match": {**base_match, "overall_sentimental_category": {"$ne": ""}}},
             {"$group": {"_id": "$overall_sentimental_category", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}},
             {"$limit": limit}
         ]
-        category_results = list(reviews_collection.aggregate(pipeline_category))
+        category_results = await reviews_collection.aggregate(pipeline_category).to_list(length=None)
         category = {doc["_id"]: doc["count"] for doc in category_results}
-        latest_doc = reviews_collection.find_one(base_match, sort=[("time_period", -1)])
-        last_updated = latest_doc.get("time_period", datetime.datetime.utcnow())
+        latest_doc = await reviews_collection.find_one(base_match, sort=[("time_period", -1)])
+        last_updated = latest_doc.get("time_period", datetime.utcnow()) if latest_doc else datetime.utcnow()
         return DetailedReport(
             overall_sentiment=overall,
             overall_sentiment_detail=detail,
@@ -522,9 +565,11 @@ def detailed_report(
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 7) Top 5 pros and top 5 cons summary (from review text frequency)
+############################################
+# 7) Top Pros/Cons Endpoint
+############################################
 @app.get("/report/top_pros_cons", response_model=TopProsConsReport)
-def top_pros_cons(
+async def top_pros_cons(
     platform: str = Query(None),
     start_date: str = Query(None),
     end_date: str = Query(None),
@@ -544,30 +589,19 @@ def top_pros_cons(
             {"$sort": {"count": -1}},
             {"$limit": 5}
         ]
-        pos_results = list(reviews_collection.aggregate(pos_pipeline))
-        neg_results = list(reviews_collection.aggregate(neg_pipeline))
+        pos_results = await reviews_collection.aggregate(pos_pipeline).to_list(length=None)
+        neg_results = await reviews_collection.aggregate(neg_pipeline).to_list(length=None)
         top_pros = {doc["_id"]: doc["count"] for doc in pos_results}
         top_cons = {doc["_id"]: doc["count"] for doc in neg_results}
         return TopProsConsReport(top_pros=top_pros, top_cons=top_cons)
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# 9) Potential Risks: Textual highlight for negative sentiment spike
-from typing import List
-import datetime
-from pydantic import BaseModel
-
-class SingleAlert(BaseModel):
-    message: str
-    severity: str
-    timestamp: str
-
-class RiskAlertsResponse(BaseModel):
-    alerts: List[SingleAlert]
-
+############################################
+# 9) Reviews Endpoint
+############################################
 @app.get("/reviews")
-def get_reviews(
+async def get_reviews(
     sentiment: str = Query(None),
     platform: str = Query(None),
     skip: int = Query(0),
@@ -582,25 +616,29 @@ def get_reviews(
     if company:
         query["company"] = company
     try:
-        reviews = list(reviews_collection.find(query).skip(skip).limit(limit))
+        cursor = reviews_collection.find(query).skip(skip).limit(limit)
+        reviews = await cursor.to_list(length=limit)
         for review in reviews:
             review["_id"] = str(review["_id"])
         return {"reviews": reviews}
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-class OverallDetailReport(BaseModel):
-    overall_sentiment_detail: Dict[str, Dict[str, float]]  # e.g. {"happy": {"count": 120, "percentage": 40.0}, ...}
+############################################
+# 10) Overall Detail Endpoint
+############################################
+class OverallDetailReportModel(BaseModel):
+    overall_sentiment_detail: Dict[str, Dict[str, float]]
     total_reviews: int
-    last_updated: datetime.datetime
+    last_updated: datetime
 
-@app.get("/report/overall_detail", response_model=OverallDetailReport)
-def overall_detail(
+@app.get("/report/overall_detail", response_model=OverallDetailReportModel)
+async def overall_detail(
     platform: str = Query(None),
     days: Optional[int] = Query(None),
     company: str = Query(None)
 ):
-    now = datetime.datetime.utcnow()
+    now = datetime.utcnow()
     if days is not None:
         start = now - datetime.timedelta(days=days)
         start_str, end_str = start.isoformat(), now.isoformat()
@@ -608,7 +646,7 @@ def overall_detail(
         start_str, end_str = None, None
 
     match = common_match(platform, start_str, end_str, company)
-    total = reviews_collection.count_documents(match)
+    total = await reviews_collection.count_documents(match)
     if total == 0:
         raise HTTPException(status_code=404, detail="No review data found for sentiment detail")
 
@@ -616,44 +654,37 @@ def overall_detail(
         {"$match": match},
         {"$group": {"_id": "$overall_sentiment_detail", "count": {"$sum": 1}}}
     ]
-    results = list(reviews_collection.aggregate(pipeline))
-
+    results = await reviews_collection.aggregate(pipeline).to_list(length=None)
     detail_distribution = {}
     for doc in results:
         detail_name = doc["_id"]
-        # Filter out entries with no label (None, empty string, or only whitespace)
         if not detail_name or (isinstance(detail_name, str) and detail_name.strip() == ""):
             continue
-
         count = doc["count"]
         percentage = round((count / total) * 100, 2)
-        # Filter out entries with zero count or percentage below threshold (e.g., less than 1%)
         if count == 0 or percentage < 1.0:
             continue
+        detail_distribution[detail_name] = {"count": count, "percentage": percentage}
 
-        detail_distribution[detail_name] = {
-            "count": count,
-            "percentage": percentage
-        }
-
-    latest_doc = reviews_collection.find_one(match, sort=[("time_period", -1)])
+    latest_doc = await reviews_collection.find_one(match, sort=[("time_period", -1)])
     last_updated = latest_doc.get("time_period", now) if latest_doc else now
 
-    return OverallDetailReport(
+    return OverallDetailReportModel(
         overall_sentiment_detail=detail_distribution,
         total_reviews=total,
         last_updated=last_updated
     )
 
-
-
+############################################
+# 11) Category Sentiment Details Endpoint
+############################################
 @app.get("/report/category_sentiment_details")
-def category_sentiment_details(
+async def category_sentiment_details(
     platform: str = Query(None),
     days: int = Query(60),
     company: str = Query(None)
 ):
-    now = datetime.datetime.utcnow()
+    now = datetime.utcnow()
     start = now - datetime.timedelta(days=days)
     
     match_query = common_match(platform, start.isoformat(), now.isoformat(), company)
@@ -662,17 +693,13 @@ def category_sentiment_details(
     pipeline = [
         {"$match": match_query},
         {"$group": {
-            "_id": {
-                "category": "$category",
-                "sentiment": "$overall_sentiment",
-                "subcat": "$overall_sentimental_category"
-            },
+            "_id": {"category": "$category", "sentiment": "$overall_sentiment", "subcat": "$overall_sentimental_category"},
             "count": {"$sum": 1}
         }},
         {"$sort": {"_id.category": 1}}
     ]
     
-    results = list(reviews_collection.aggregate(pipeline))
+    results = await reviews_collection.aggregate(pipeline).to_list(length=None)
     
     data_map = {}
     
@@ -704,43 +731,38 @@ def category_sentiment_details(
     
     return {"category_sentiment": final_list}
 
+############################################
+# 12) Detail Categories Endpoint
+############################################
 class DetailCategoryItem(BaseModel):
     overall_sentiment_detail: str
     categories: List[str]
     overall_sentimental_categories: List[str]
-    summary: str = ""  # New field for the summary
+    summary: str = ""  # new field for summary
 
-class DetailCategoryReport(BaseModel):
+class DetailCategoryReportModel(BaseModel):
     details: List[DetailCategoryItem]
 
-@app.get("/report/detail_categories", response_model=DetailCategoryReport)
-def detail_categories(
+@app.get("/report/detail_categories", response_model=DetailCategoryReportModel)
+async def detail_categories(
     platform: str = Query(None),
     days: int = Query(30),
     company: str = Query(None)
 ):
-    """
-    For each overall_sentiment_detail (e.g., "satisfied", "frustrated"),
-    returns the overall_sentimental_categories and summary from the 
-    sentimental_analysis_pre_save_data collection.
-    """
-    now = datetime.datetime.utcnow()
+    now = datetime.utcnow()
     start = now - datetime.timedelta(days=days)
     
-    # Build a filter based on the created_at time window and non-empty sentiment detail.
     match = {
         "created_at": {"$gte": start, "$lte": now},
         "overall_sentiment_detail": {"$ne": ""}
     }
-    # Optionally, filter by platform if your pre-saved data includes a platform field.
     if platform:
         match["platform"] = platform
-    # Add company filter specifically
     if company:
         match["company"] = company
     
     pre_saved_collection = db["sentimental_emotion_analysis_detail"]
-    results = list(pre_saved_collection.find(match))
+    results = await pre_saved_collection.find(match).to_list(length=None)
     
     details_dict = {}
     for doc in results:
@@ -756,34 +778,18 @@ def detail_categories(
     details = list(details_dict.values())
     details.sort(key=lambda x: x["overall_sentiment_detail"])
     
-    return DetailCategoryReport(details=details)
+    return DetailCategoryReportModel(details=details)
 
-class CategoryAnalysis(BaseModel):
-    category: str
-    sentiment_counts: Dict[str, float]
-    detail_counts: Dict[str, int]
-    pros: List[str]
-    cons: List[str]
-    # sentimental_categories: List[str]  # Uncomment if needed
-
+############################################
+# 13) Category Analysis Endpoint
+############################################
 @app.get("/report/category_analysis")
-def get_category_analysis(category: str, company: str = Query(None)):
-    """
-    Return the shape:
-    {
-      "category": str,
-      "sentiment_counts": {"positive": float, "negative": float, "neutral": float},
-      "detail_counts": { emotionName: number, ... },
-      "pros": [str, ...],
-      "cons": [str, ...],
-      "sentimental_categories": [str, ...]
-    }
-    """
+async def get_category_analysis(category: str, company: str = Query(None)):
     match_query = {"category": category}
     if company:
         match_query["company"] = company
     
-    total_docs = reviews_collection.count_documents(match_query)
+    total_docs = await reviews_collection.count_documents(match_query)
     if total_docs == 0:
         return {
             "category": category,
@@ -793,54 +799,59 @@ def get_category_analysis(category: str, company: str = Query(None)):
             "cons": [],
             "sentimental_categories": []
         }
-
+    
     pipeline_sentiment = [
         {"$match": match_query},
         {"$group": {"_id": "$overall_sentiment", "count": {"$sum": 1}}}
     ]
+    sentiment_cursor = reviews_collection.aggregate(pipeline_sentiment)
     sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
-    for doc in reviews_collection.aggregate(pipeline_sentiment):
+    async for doc in sentiment_cursor:
         if doc["_id"] in sentiment_counts:
             sentiment_counts[doc["_id"]] = round((doc["count"] / total_docs) * 100, 2)
-
+    
     pipeline_detail = [
         {"$match": match_query},
         {"$group": {"_id": "$overall_sentiment_detail", "count": {"$sum": 1}}}
     ]
+    detail_cursor = reviews_collection.aggregate(pipeline_detail)
     detail_counts = {}
-    for doc in reviews_collection.aggregate(pipeline_detail):
+    async for doc in detail_cursor:
         if doc["_id"]:
             detail_counts[doc["_id"]] = doc["count"]
-
+    
     pipeline_pros = [
         {"$match": {**match_query, "overall_sentiment": "positive", "overall_summary": {"$ne": ""}}},
         {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
         {"$limit": 10}
     ]
+    pros_cursor = reviews_collection.aggregate(pipeline_pros)
     pros = []
-    for doc in reviews_collection.aggregate(pipeline_pros):
+    async for doc in pros_cursor:
         pros.append(doc["_id"])
-
+    
     pipeline_cons = [
         {"$match": {**match_query, "overall_sentiment": "negative", "overall_summary": {"$ne": ""}}},
         {"$group": {"_id": "$overall_summary", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
         {"$limit": 10}
     ]
+    cons_cursor = reviews_collection.aggregate(pipeline_cons)
     cons = []
-    for doc in reviews_collection.aggregate(pipeline_cons):
+    async for doc in cons_cursor:
         cons.append(doc["_id"])
-
+    
     pipeline_sentcats = [
         {"$match": match_query},
         {"$group": {"_id": "$overall_sentimental_category"}}
     ]
+    sentcats_cursor = reviews_collection.aggregate(pipeline_sentcats)
     sentimental_categories = []
-    for doc in reviews_collection.aggregate(pipeline_sentcats):
+    async for doc in sentcats_cursor:
         if doc["_id"]:
             sentimental_categories.append(doc["_id"])
-
+    
     return {
         "category": category,
         "sentiment_counts": sentiment_counts,
@@ -850,71 +861,56 @@ def get_category_analysis(category: str, company: str = Query(None)):
         "sentimental_categories": sentimental_categories
     }
 
-def convert_object_ids(obj):
-    # Recursively convert ObjectId values to strings.
-    if isinstance(obj, ObjectId):
-        return str(obj)
-    elif isinstance(obj, list):
-        return [convert_object_ids(item) for item in obj]
-    elif isinstance(obj, dict):
-        return {key: convert_object_ids(value) for key, value in obj.items()}
-    else:
-        return obj
-
-# Api for monthly analysis
+############################################
+# 14) Monthly Analysis Endpoint
+############################################
 from dateutil.relativedelta import relativedelta
 
 @app.get("/report/monthly_analysis")
-def get_monthly_analysis(
+async def get_monthly_analysis(
     company: str = Query(..., description="Company name, e.g., 'cook_and_pan'"),
     year: int = Query(..., description="Year, e.g., 2025"),
     month: int = Query(..., description="Month as an integer, e.g., 4")
 ):
-    # Create a start date and an end date for the given month
-    start_date = datetime.datetime(year, month, 1)
+    start_date = datetime(year, month, 1)
     end_date = start_date + relativedelta(months=1)
     
-    # Build the query to filter by the time_period field (a date)
     query = {
         "company": company,
         "time_period": {"$gte": start_date, "$lt": end_date}
     }
     
-    doc = monthly_reports_collection.find_one(query)
+    doc = await monthly_reports_collection.find_one(query)
     if not doc:
         raise HTTPException(status_code=404, detail="No monthly data found for this company and month.")
     
-    # Convert ObjectId fields to strings and format dates
     doc = convert_object_ids(doc)
-    if "time_period" in doc and isinstance(doc["time_period"], datetime.datetime):
+    if "time_period" in doc and isinstance(doc["time_period"], datetime):
         doc["time_period"] = doc["time_period"].isoformat()
-
     
     return doc
 
-################################### Shopify Data ################################################################
-
-# Lifetime Shopify Data
+############################################
+# 15) Shopify Insights Endpoint
+############################################
 shopify_insights_lifetime_collection = db["shopify_insights_lifetime"]
 
 @app.get("/shopify_insights")
-def get_shopify_insights():
-    # Fetch one document from the collection
-    document = shopify_insights_lifetime_collection.find_one()
+async def get_shopify_insights():
+    document = await shopify_insights_lifetime_collection.find_one()
     if not document:
         raise HTTPException(status_code=404, detail="Data not found")
     
-    # Return only the specified keys
     return {
         "company": document.get("company"),
         "total_gross_sales": document.get("total_gross_sales"),
         "total_customers": document.get("total_customers"),
-        "total_orders":document.get("total_orders"),
+        "total_orders": document.get("total_orders"),
         "best_selling_products": document.get("best_selling_products"),
     }
-
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
     # uvicorn.run("main:app", host="127.0.0.1", port=8080, reload=True)
+

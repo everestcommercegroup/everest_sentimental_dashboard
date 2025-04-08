@@ -1584,12 +1584,17 @@ const StatsOverview = ({ overallData }) => {
       <>
 
 {(activeTab === 'overview' || activeTab === 'categories') && (
-  <EmotionalStats
-    emotionalData={emotionalData}
-    onEmotionClick={handleEmotionClick}
-  />
-  
-)}
+        <>
+          {/* Add overall sentiment metrics here */}
+          <StatsOverview overallData={overallData} />
+
+          {/* Existing component: Emotional analysis */}
+          <EmotionalStats
+            emotionalData={emotionalData}
+            onEmotionClick={handleEmotionClick}
+          />
+        </>
+      )}
 
 {activeTab === 'monthlyReport' && (
   <>

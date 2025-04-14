@@ -233,7 +233,7 @@ function MonthlyFeedbackTooltip({ active, payload, label }: any) {
 function Dashboard() {
 
 
-  const [selectedCompany, setSelectedCompany] = useState<string>('cook_and_pan');
+  const [selectedCompany, setSelectedCompany] = useState<string>('cozy_heaven');
   const [monthlyFeedback, setMonthlyFeedback] = useState<MonthlyFeedbackItem[]>([]);
   // Some new useState lines near your other states:
   const [selectedIssueReviews, setSelectedIssueReviews] = useState<any[]>([]);
@@ -810,7 +810,7 @@ const [categories] = useState<string[]>([
 const CompanySelector = () => (
   <div className="mb-6 flex items-center gap-4">
     {[
-      { display: "Cook and Pan", value: "cook_and_pan" },
+      // { display: "Cook and Pan", value: "cook_and_pan" },
       { display: "Cozy Heaven", value: "cozy_heaven" }
     ].map((company) => (
       <button
@@ -999,7 +999,7 @@ const CompanySelector = () => (
   const PlatformSelector = () => (
     <div className="mb-6 flex items-center gap-4">
       <div className="flex gap-2">
-        {['all', 'gorgias', 'trustpilot', 'opencx'].map((platform) => (
+        {['all', 'email', 'trusted_shop'].map((platform) => (
           <button
             key={platform}
             onClick={() => setSelectedPlatform(platform)}
@@ -2205,7 +2205,7 @@ const StatsOverview = ({ overallData }) => {
   <FolderHeart className="w-6 h-6" />
 </button>
 
-<button
+{/* <button
   onClick={() => setActiveTab('monthlyFeedback')}
   title="Monthly Sementic Analysis"
   className={`p-3 rounded-lg transition-colors duration-200 ${
@@ -2215,8 +2215,8 @@ const StatsOverview = ({ overallData }) => {
   }`}
 >
   <ListChecks className="w-6 h-6" />
-</button>
-<button
+</button> */}
+{/* <button
     onClick={() => setActiveTab('shopify')}
     title="Shopify Analytics"
     className={`p-3 rounded-lg transition-colors duration-200 ${
@@ -2226,7 +2226,7 @@ const StatsOverview = ({ overallData }) => {
     }`}
   >
     <ShoppingBag className="w-6 h-6" />
-  </button>
+  </button> */}
 
   <button
   onClick={() => setActiveTab('monthlyReport')}
@@ -2238,7 +2238,7 @@ const StatsOverview = ({ overallData }) => {
   }`}
 >
   <Calendar className="w-6 h-6" />
-</button>
+</button> 
 
 
 

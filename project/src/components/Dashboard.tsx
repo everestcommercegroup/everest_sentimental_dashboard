@@ -318,7 +318,13 @@ const [categories] = useState<string[]>([
     const today = new Date();
     const localYear = today.getFullYear();
     const localMonth = ("0" + (today.getMonth() + 1)).slice(-2); // getMonth() is 0-indexed
-    const selectedMonthLocal = `${localYear}-${localMonth}`;
+    
+    // Limit to March 2025 maximum
+    const maxAllowedDate = new Date(2025, 2, 1); // March 2025 (month is 0-indexed)
+    const currentDate = new Date(localYear, today.getMonth(), 1);
+    const initialDate = currentDate > maxAllowedDate ? maxAllowedDate : currentDate;
+    
+    const selectedMonthLocal = `${initialDate.getFullYear()}-${("0" + (initialDate.getMonth() + 1)).slice(-2)}`;
 
     // const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
     const [selectedMonth, setSelectedMonth] = useState<string>(selectedMonthLocal);
@@ -326,7 +332,28 @@ const [categories] = useState<string[]>([
     const [monthlyReport, setMonthlyReport] = useState<MonthlyReportData | null>(null);
     const [monthlyReportLoading, setMonthlyReportLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [availableMonths, setAvailableMonths] = useState<Array<{value: string, label: string}>>([]);
+    const [availableMonthsLoading, setAvailableMonthsLoading] = useState(false);
+    const [showAvailableMonths, setShowAvailableMonths] = useState(false);
   
+    // ================================
+    // 2.1.0. Fetch available months
+    // ================================
+    const fetchAvailableMonths = useCallback(async () => {
+      try {
+        setAvailableMonthsLoading(true);
+        const response = await axios.get(`${API_BASE_URL}/report/available_months`, {
+          params: { company: selectedCompany }
+        });
+        setAvailableMonths(response.data.available_months || []);
+      } catch (err) {
+        console.error('Failed to fetch available months:', err);
+        setAvailableMonths([]);
+      } finally {
+        setAvailableMonthsLoading(false);
+      }
+    }, [API_BASE_URL, selectedCompany]);
+
     // ================================
     // 2.1.1. This is the main fetcher
     // ================================
@@ -334,6 +361,7 @@ const [categories] = useState<string[]>([
       try {
         setMonthlyReportLoading(true);
         setError(null);
+        setShowAvailableMonths(false);
   
         const url = `${API_BASE_URL}/report/monthly_analysis`;
         const year = parseInt(selectedMonth.slice(0, 4));
@@ -352,6 +380,24 @@ const [categories] = useState<string[]>([
       } catch (err: any) {
         if (err.response && err.response.status === 404) {
           setMonthlyReport(null);
+          setShowAvailableMonths(true);
+          
+          // If the error response contains available months, use them
+          if (err.response.data?.detail?.available_months) {
+            const months = err.response.data.detail.available_months.map((month: string) => ({
+              value: month,
+              label: month
+            }));
+            setAvailableMonths(months);
+            
+            // Auto-select the most recent available month if current selection has no data
+            if (months.length > 0 && !months.find((m: any) => m.value === selectedMonth)) {
+              setSelectedMonth(months[0].value);
+              return; // This will trigger a re-fetch with the new month
+            }
+          }
+          
+          setError(`No data available for ${selectedMonth}. Please select a different month.`);
         } else {
           setError('Failed to fetch monthly report');
         }
@@ -360,6 +406,11 @@ const [categories] = useState<string[]>([
         setMonthlyReportLoading(false);
       }
     }, [API_BASE_URL, selectedCompany, selectedMonth]);
+
+    // Fetch available months when component mounts or company changes
+    useEffect(() => {
+      fetchAvailableMonths();
+    }, [fetchAvailableMonths]);
   
     useEffect(() => {
       fetchMonthlyReport();
@@ -471,15 +522,103 @@ const [categories] = useState<string[]>([
       );
     }
   
-    if (error) {
+    if (error || (!monthlyReport && !monthlyReportLoading)) {
       return (
-        <div className="flex items-center justify-center h-64">
-          <div className="text-xl text-red-400">{error}</div>
+        <div className="space-y-6">
+          {/* Header with Month Controls */}
+          <div className="flex items-center justify-between mb-8 bg-white/5 backdrop-blur-lg rounded-xl p-4 border border-white/10">
+            <button
+              onClick={() => {
+                const date = new Date(selectedMonth);
+                date.setMonth(date.getMonth() - 1);
+                setSelectedMonth(date.toISOString().slice(0, 7));
+              }}
+              className="p-2 hover:bg-white/10 rounded-lg transition-all"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5" />
+              <input
+                type="month"
+                value={selectedMonth}
+                max="2025-03"
+                onChange={(e) => {
+                  const newValue = e.target.value;
+                  if (newValue <= "2025-03") {
+                    setSelectedMonth(newValue);
+                  }
+                }}
+                className="bg-transparent border-none text-lg font-semibold focus:outline-none"
+              />
+            </div>
+            
+            <button
+              onClick={() => {
+                const date = new Date(selectedMonth);
+                date.setMonth(date.getMonth() + 1);
+                const newDateString = date.toISOString().slice(0, 7);
+                // Only allow navigation up to March 2025
+                if (newDateString <= "2025-03") {
+                  setSelectedMonth(newDateString);
+                }
+              }}
+              className="p-2 hover:bg-white/10 rounded-lg transition-all"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Error/No Data Message */}
+          <div className="bg-white/5 backdrop-blur-lg rounded-xl p-8 border border-white/10 text-center">
+            <div className="mb-6">
+              <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-2xl font-semibold text-white mb-2">No Data Available</h3>
+              <p className="text-gray-400 text-lg">
+                {error || `No monthly report data found for ${selectedMonth}`}
+              </p>
+            </div>
+
+            {/* Available Months */}
+            {availableMonths.length > 0 && (
+              <div className="space-y-4">
+                <h4 className="text-lg font-medium text-white">Available Months:</h4>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {availableMonths.map((month) => (
+                    <button
+                      key={month.value}
+                      onClick={() => setSelectedMonth(month.value)}
+                      className={`p-3 rounded-lg border transition-all ${
+                        selectedMonth === month.value
+                          ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                          : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      {month.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Loading state for available months */}
+            {availableMonthsLoading && (
+              <div className="text-gray-400">Loading available months...</div>
+            )}
+
+            {/* No available months */}
+            {!availableMonthsLoading && availableMonths.length === 0 && (
+              <div className="text-gray-400">
+                No monthly report data available for {selectedCompany}
+              </div>
+            )}
+          </div>
         </div>
       );
     }
-  
-    if (!monthlyReport && !monthlyReportLoading && !error) {
+
+    if (!monthlyReport) {
       return (
         <div className="text-center text-gray-300 text-xl py-10">
           No data available for this month
@@ -494,7 +633,8 @@ const [categories] = useState<string[]>([
             onClick={() => {
               const date = new Date(selectedMonth);
               date.setMonth(date.getMonth() - 1);
-              setSelectedMonth(date.toISOString().slice(0, 7));
+              const newDateString = date.toISOString().slice(0, 7);
+              setSelectedMonth(newDateString);
             }}
             className="p-2 hover:bg-white/10 rounded-lg transition-all"
           >
@@ -506,43 +646,32 @@ const [categories] = useState<string[]>([
             <input
               type="month"
               value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
+              max="2025-03"
+              onChange={(e) => {
+                const newValue = e.target.value;
+                if (newValue <= "2025-03") {
+                  setSelectedMonth(newValue);
+                }
+              }}
               className="bg-transparent border-none text-lg font-semibold focus:outline-none"
             />
           </div>
-          {/* Show loading state */}
-    {monthlyReportLoading && (
-      <div className="text-center text-gray-400 py-10">Loading Monthly Report...</div>
-    )}
-
-    {/* Show error state */}
-    {error && (
-      <div className="text-center text-red-400 py-10">{error}</div>
-    )}
-
-    {/* Show no data message if monthlyReport is null */}
-    {!monthlyReport && !monthlyReportLoading && !error && (
-      <div className="text-center text-gray-300 text-xl py-10">
-        No data available for this month
-      </div>
-    )}
+          
           <button
             onClick={() => {
               const date = new Date(selectedMonth);
               date.setMonth(date.getMonth() + 1);
-              setSelectedMonth(date.toISOString().slice(0, 7));
+              const newDateString = date.toISOString().slice(0, 7);
+              // Only allow navigation up to March 2025
+              if (newDateString <= "2025-03") {
+                setSelectedMonth(newDateString);
+              }
             }}
             className="p-2 hover:bg-white/10 rounded-lg transition-all"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
-
-        {(!monthlyReport && !monthlyReportLoading && !error) && (
-        <div className="text-center text-gray-300 text-xl py-10">
-          No data available for this month
-        </div>
-      )}
   
         {/* ============== Overview Stats Grid ================ */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -571,7 +700,6 @@ const [categories] = useState<string[]>([
           "bg-purple-500/10"
         )}
       </div>
-
 
          {/* Quick Wins & Priority Focus Areas */}
     {renderQuickInsightsSection()}
@@ -1599,7 +1727,7 @@ const StatsOverview = ({ overallData }) => {
 {activeTab === 'monthlyReport' && (
   <>
   <MonthlyReportView
-    API_BASE_URL={API_BASE_URL}           // pass your old code’s API_BASE_URL
+    API_BASE_URL={API_BASE_URL}           // pass your old code's API_BASE_URL
     selectedCompany={selectedCompany}     // or however you track the selected company
   />
   </>
@@ -2147,6 +2275,25 @@ const StatsOverview = ({ overallData }) => {
         )}
       </>
     );
+  };
+
+  // Helper function to check if a date is within allowed range
+  const isDateAllowed = (dateString: string) => {
+    const date = new Date(dateString + '-01');
+    return date <= maxAllowedDate;
+  };
+
+  // Helper function to get max allowed date string for input
+  const getMaxDateString = () => {
+    return "2025-03";
+  };
+
+  // Helper function to check if next month navigation should be disabled
+  const isNextMonthDisabled = () => {
+    const currentDate = new Date(selectedMonth + '-01');
+    const nextMonth = new Date(currentDate);
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    return nextMonth > maxAllowedDate;
   };
 
   return (

@@ -862,6 +862,61 @@ async def get_category_analysis(category: str, company: str = Query(None)):
     }
 
 ############################################
+# 14.1) Available Months Endpoint
+############################################
+@app.get("/report/available_months")
+async def get_available_months(company: str = Query(..., description="Company name")):
+    """Get available months for monthly analysis data for a specific company (up to March 2025)"""
+    try:
+        # Set maximum allowed date to March 2025
+        max_allowed_date = datetime(2025, 3, 31)
+        
+        pipeline = [
+            {"$match": {
+                "company": company,
+                "time_period": {"$lte": max_allowed_date}  # Only include data up to March 2025
+            }},
+            {"$project": {
+                "year": {"$year": "$time_period"},
+                "month": {"$month": "$time_period"},
+                "time_period": 1
+            }},
+            {"$group": {
+                "_id": {
+                    "year": "$year",
+                    "month": "$month"
+                },
+                "latest_time_period": {"$max": "$time_period"}
+            }},
+            {"$sort": {"_id.year": -1, "_id.month": -1}},
+            {"$limit": 12}  # Get last 12 months of available data
+        ]
+        
+        results = await monthly_reports_collection.aggregate(pipeline).to_list(length=None)
+        
+        available_months = []
+        for doc in results:
+            year = doc["_id"]["year"]
+            month = doc["_id"]["month"]
+            
+            # Double-check the date limit
+            if year > 2025 or (year == 2025 and month > 3):
+                continue
+                
+            # Format as YYYY-MM
+            month_str = f"{year}-{month:02d}"
+            available_months.append({
+                "value": month_str,
+                "label": f"{year}-{month:02d}",
+                "year": year,
+                "month": month
+            })
+        
+        return {"available_months": available_months}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+############################################
 # 14) Monthly Analysis Endpoint
 ############################################
 from dateutil.relativedelta import relativedelta
@@ -872,6 +927,18 @@ async def get_monthly_analysis(
     year: int = Query(..., description="Year, e.g., 2025"),
     month: int = Query(..., description="Month as an integer, e.g., 4")
 ):
+    # Check if requested date is beyond March 2025
+    if year > 2025 or (year == 2025 and month > 3):
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "message": f"Data access is limited to March 2025 and earlier. Requested: {year}-{month:02d}",
+                "max_allowed": "2025-03",
+                "requested_month": f"{year}-{month:02d}",
+                "company": company
+            }
+        )
+    
     start_date = datetime(year, month, 1)
     end_date = start_date + relativedelta(months=1)
     
@@ -882,7 +949,55 @@ async def get_monthly_analysis(
     
     doc = await monthly_reports_collection.find_one(query)
     if not doc:
-        raise HTTPException(status_code=404, detail="No monthly data found for this company and month.")
+        # If no data found, get available months for this company (up to March 2025)
+        max_allowed_date = datetime(2025, 3, 31)
+        pipeline = [
+            {"$match": {
+                "company": company,
+                "time_period": {"$lte": max_allowed_date}
+            }},
+            {"$project": {
+                "year": {"$year": "$time_period"},
+                "month": {"$month": "$time_period"},
+                "time_period": 1
+            }},
+            {"$group": {
+                "_id": {
+                    "year": "$year",
+                    "month": "$month"
+                },
+                "latest_time_period": {"$max": "$time_period"}
+            }},
+            {"$sort": {"_id.year": -1, "_id.month": -1}},
+            {"$limit": 3}  # Get last 3 months of available data
+        ]
+        
+        available_results = await monthly_reports_collection.aggregate(pipeline).to_list(length=None)
+        
+        available_months = []
+        for result in available_results:
+            year_avail = result["_id"]["year"]
+            month_avail = result["_id"]["month"]
+            
+            # Double-check the date limit
+            if year_avail > 2025 or (year_avail == 2025 and month_avail > 3):
+                continue
+                
+            available_months.append(f"{year_avail}-{month_avail:02d}")
+        
+        error_detail = f"No monthly data found for {company} in {year}-{month:02d}."
+        if available_months:
+            error_detail += f" Available months: {', '.join(available_months)}"
+        
+        raise HTTPException(
+            status_code=404, 
+            detail={
+                "message": error_detail,
+                "available_months": available_months,
+                "requested_month": f"{year}-{month:02d}",
+                "company": company
+            }
+        )
     
     doc = convert_object_ids(doc)
     if "time_period" in doc and isinstance(doc["time_period"], datetime):

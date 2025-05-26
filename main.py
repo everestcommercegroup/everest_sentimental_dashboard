@@ -1,5 +1,6 @@
 import os
 import datetime
+import logging
 from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -8,7 +9,7 @@ from pymongo.errors import PyMongoError
 from dotenv import load_dotenv
 from bson.objectid import ObjectId
 from typing import List, Dict, Any, Optional
-from datetime import datetime,timedelta
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -17,6 +18,10 @@ from passlib.context import CryptContext
 import jwt
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -225,7 +230,7 @@ async def overall_by_platform(
 ):
     if days is not None:
         now = datetime.utcnow()
-        start = now - datetime.timedelta(days=days)
+        start = now - timedelta(days=days)
         start_str, end_str = start.isoformat(), now.isoformat()
     else:
         start_str, end_str = None, None
@@ -272,7 +277,7 @@ async def report_trends(
     try:
         if days is not None:
             now = datetime.utcnow()
-            start = now - datetime.timedelta(days=days)
+            start = now - timedelta(days=days)
             start_str, end_str = start.isoformat(), now.isoformat()
         else:
             start_str, end_str = None, None
@@ -329,7 +334,7 @@ async def monthly_feedback(
 ):
     if days is not None:
         now = datetime.utcnow()
-        start = now - datetime.timedelta(days=days)
+        start = now - timedelta(days=days)
         start_str, end_str = start.isoformat(), now.isoformat()
     else:
         start_str, end_str = None, None
@@ -640,7 +645,7 @@ async def overall_detail(
 ):
     now = datetime.utcnow()
     if days is not None:
-        start = now - datetime.timedelta(days=days)
+        start = now - timedelta(days=days)
         start_str, end_str = start.isoformat(), now.isoformat()
     else:
         start_str, end_str = None, None
@@ -685,7 +690,7 @@ async def category_sentiment_details(
     company: str = Query(None)
 ):
     now = datetime.utcnow()
-    start = now - datetime.timedelta(days=days)
+    start = now - timedelta(days=days)
     
     match_query = common_match(platform, start.isoformat(), now.isoformat(), company)
     match_query["category"] = {"$ne": ""}
@@ -749,36 +754,103 @@ async def detail_categories(
     days: int = Query(30),
     company: str = Query(None)
 ):
-    now = datetime.utcnow()
-    start = now - datetime.timedelta(days=days)
-    
-    match = {
-        "created_at": {"$gte": start, "$lte": now},
-        "overall_sentiment_detail": {"$ne": ""}
-    }
-    if platform:
-        match["platform"] = platform
-    if company:
-        match["company"] = company
-    
-    pre_saved_collection = db["sentimental_emotion_analysis_detail"]
-    results = await pre_saved_collection.find(match).to_list(length=None)
-    
-    details_dict = {}
-    for doc in results:
-        sentiment_detail = doc.get("overall_sentiment_detail")
-        if sentiment_detail not in details_dict:
-            details_dict[sentiment_detail] = {
-                "overall_sentiment_detail": sentiment_detail,
-                "categories": doc.get("categories", []),
-                "overall_sentimental_categories": doc.get("overall_sentimental_categories", []),
-                "summary": doc.get("summary", "")
+    try:
+        logger.info(f"detail_categories called with platform={platform}, days={days}, company={company}")
+        
+        now = datetime.utcnow()
+        start = now - timedelta(days=days)
+        
+        match = {
+            "created_at": {"$gte": start, "$lte": now},
+            "overall_sentiment_detail": {"$ne": ""}
+        }
+        if platform:
+            match["platform"] = platform
+        if company:
+            match["company"] = company
+        
+        logger.info(f"Querying pre-saved collection with match: {match}")
+        
+        # Try to access the pre-saved collection first
+        pre_saved_collection = db["sentimental_emotion_analysis_detail"]
+        
+        try:
+            results = await pre_saved_collection.find(match).to_list(length=None)
+            logger.info(f"Pre-saved collection returned {len(results)} results")
+        except Exception as collection_error:
+            # If the collection doesn't exist or query fails, fall back to main collection
+            logger.warning(f"Pre-saved collection error: {collection_error}")
+            results = []
+        
+        # If no results from pre-saved collection, try to get data from main reviews collection
+        if not results:
+            logger.info("No results from pre-saved collection, trying fallback to main collection")
+            # Fallback to main reviews collection
+            fallback_match = {
+                "time_period": {"$gte": start, "$lte": now},
+                "overall_sentiment_detail": {"$ne": "", "$exists": True}
             }
+            if platform:
+                fallback_match["platform"] = platform
+            if company:
+                fallback_match["company"] = company
+            
+            logger.info(f"Fallback query match: {fallback_match}")
+            
+            # Get unique sentiment details from main collection
+            pipeline = [
+                {"$match": fallback_match},
+                {"$group": {
+                    "_id": "$overall_sentiment_detail",
+                    "categories": {"$addToSet": "$category"},
+                    "overall_sentimental_categories": {"$addToSet": "$overall_sentimental_category"},
+                    "sample_summary": {"$first": "$overall_summary"}
+                }},
+                {"$project": {
+                    "overall_sentiment_detail": "$_id",
+                    "categories": {"$filter": {"input": "$categories", "cond": {"$ne": ["$$this", ""]}}},
+                    "overall_sentimental_categories": {"$filter": {"input": "$overall_sentimental_categories", "cond": {"$ne": ["$$this", ""]}}},
+                    "summary": {"$ifNull": ["$sample_summary", ""]}
+                }}
+            ]
+            
+            try:
+                fallback_results = await reviews_collection.aggregate(pipeline).to_list(length=None)
+                logger.info(f"Fallback query returned {len(fallback_results)} results")
+                # Convert to expected format
+                results = []
+                for doc in fallback_results:
+                    results.append({
+                        "overall_sentiment_detail": doc["overall_sentiment_detail"],
+                        "categories": doc.get("categories", []),
+                        "overall_sentimental_categories": doc.get("overall_sentimental_categories", []),
+                        "summary": doc.get("summary", "")
+                    })
+            except Exception as fallback_error:
+                logger.error(f"Fallback query error: {fallback_error}")
+                results = []
+        
+        details_dict = {}
+        for doc in results:
+            sentiment_detail = doc.get("overall_sentiment_detail")
+            if sentiment_detail and sentiment_detail not in details_dict:
+                details_dict[sentiment_detail] = {
+                    "overall_sentiment_detail": sentiment_detail,
+                    "categories": doc.get("categories", []),
+                    "overall_sentimental_categories": doc.get("overall_sentimental_categories", []),
+                    "summary": doc.get("summary", "")
+                }
+        
+        details = list(details_dict.values())
+        details.sort(key=lambda x: x["overall_sentiment_detail"])
+        
+        logger.info(f"Returning {len(details)} detail categories")
+        return DetailCategoryReportModel(details=details)
     
-    details = list(details_dict.values())
-    details.sort(key=lambda x: x["overall_sentiment_detail"])
-    
-    return DetailCategoryReportModel(details=details)
+    except Exception as e:
+        logger.error(f"Error in detail_categories endpoint: {str(e)}", exc_info=True)
+        # Return empty response instead of 500 error
+        return DetailCategoryReportModel(details=[])
 
 ############################################
 # 13) Category Analysis Endpoint

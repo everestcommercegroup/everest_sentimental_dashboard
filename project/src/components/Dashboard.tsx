@@ -306,7 +306,7 @@ const [categories] = useState<string[]>([
 
 
   const API_BASE_URL = 'https://everest-sentimental-dashboard-backend.onrender.com';
-//   const API_BASE_URL = "http://127.0.0.1:8080"
+  // const API_BASE_URL = "http://127.0.0.1:8080"
 
 
   // Monthly Report
@@ -1388,9 +1388,8 @@ const CompanySelector = () => (
 
 
   // Add this new component definition to replace the pie chart
-  function EmotionalStats({ emotionalData, onEmotionClick }: { 
+  function EmotionalStats({ emotionalData }: { 
     emotionalData: { overall_sentiment_detail: Record<string, { count: number; percentage: number }> };
-    onEmotionClick: (emotion: string) => void;
   }) {
     return (
       <div className="mb-8">
@@ -1399,12 +1398,11 @@ const CompanySelector = () => (
           {Object.entries(emotionalData.overall_sentiment_detail).map(([emotion, stats]) => {
             const { count, percentage } = stats;
             return (
-              <div
-                key={emotion}
-                className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-all group cursor-pointer"
-                style={{ borderLeftColor: emotionColors[emotion] || '#6B7280', borderLeftWidth: '4px' }}
-                onClick={() => onEmotionClick(emotion)}
-              >
+            <div
+              key={emotion}
+              className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 transition-all group"
+              style={{ borderLeftColor: emotionColors[emotion] || '#6B7280', borderLeftWidth: '4px' }}
+            >
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="text-sm font-medium capitalize text-gray-400">
                     {emotion}
@@ -1449,7 +1447,7 @@ const CompanySelector = () => (
   {criticalIssues.map((item, index) => (
     <button
       key={index}
-      onClick={() => handleIssueClick(item.category)}
+      onClick={() => handleIssueClick(item.category, "negative")}
       className="p-3 bg-white/5 rounded-lg text-left w-full hover:bg-white/10 transition"
     >
       <p className="text-gray-300">{item.category}</p>
@@ -1724,9 +1722,8 @@ const StatsOverview = ({ overallData }: { overallData: OverallReport }) => {
 
           {/* Existing component: Emotional analysis */}
           <EmotionalStats
-            emotionalData={emotionalData}
-            onEmotionClick={handleEmotionClick}
-          />
+  emotionalData={emotionalData}
+/>
         </>
       )}
 

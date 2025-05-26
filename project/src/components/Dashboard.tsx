@@ -884,6 +884,7 @@ const [categories] = useState<string[]>([
   const processOverallData = useCallback((data: unknown): OverallReport => {
     const defaultData: OverallReport = {
       overall_sentiment: { positive: 0, negative: 0, neutral: 0 },
+      sentiment_counts: { positive: 0, negative: 0, neutral: 0 },
       total_reviews: 0,
       last_updated: new Date().toISOString()
     };
@@ -896,6 +897,11 @@ const [categories] = useState<string[]>([
         positive: safeNumber(safeData?.overall_sentiment?.positive),
         negative: safeNumber(safeData?.overall_sentiment?.negative),
         neutral: safeNumber(safeData?.overall_sentiment?.neutral)
+      },
+      sentiment_counts: {
+        positive: safeNumber(safeData?.sentiment_counts?.positive),
+        negative: safeNumber(safeData?.sentiment_counts?.negative),
+        neutral: safeNumber(safeData?.sentiment_counts?.neutral)
       },
       total_reviews: safeNumber(safeData?.total_reviews),
       last_updated: safeString(safeData?.last_updated) || defaultData.last_updated
@@ -1639,7 +1645,7 @@ function MonthlyFeedbackCards({ data }: Props) {
 console.log("Shopify data:", shopifyData);
 
 
-const StatsOverview = ({ overallData }) => {
+const StatsOverview = ({ overallData }: { overallData: OverallReport }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
       {/* Positive Sentiment */}

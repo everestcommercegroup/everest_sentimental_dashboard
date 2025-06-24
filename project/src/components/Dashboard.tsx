@@ -233,7 +233,8 @@ function MonthlyFeedbackTooltip({ active, payload, label }: any) {
 function Dashboard() {
 
 
-  const [selectedCompany, setSelectedCompany] = useState<string>('cozy_heaven');
+  const [selectedCompany, setSelectedCompany] = useState<string>('');
+  const [availableCompanies, setAvailableCompanies] = useState<Array<{value: string, display: string}>>([]);
   const [monthlyFeedback, setMonthlyFeedback] = useState<MonthlyFeedbackItem[]>([]);
   // Some new useState lines near your other states:
   const [selectedIssueReviews, setSelectedIssueReviews] = useState<any[]>([]);
@@ -319,8 +320,16 @@ const [categories] = useState<string[]>([
     const localYear = today.getFullYear();
     const localMonth = ("0" + (today.getMonth() + 1)).slice(-2); // getMonth() is 0-indexed
     
-    // Limit to March 2025 maximum
-    const maxAllowedDate = new Date(2025, 2, 1); // March 2025 (month is 0-indexed)
+    // Company-specific date limits for monthly reports
+    const getMaxAllowedDate = () => {
+      if (selectedCompany === "marielle_stokkelaar") {
+        return new Date(2025, 5, 1); // June 2025 (month is 0-indexed)
+      } else {
+        return new Date(2025, 2, 1); // March 2025 (month is 0-indexed)
+      }
+    };
+    
+    const maxAllowedDate = getMaxAllowedDate();
     const currentDate = new Date(localYear, today.getMonth(), 1);
     const initialDate = currentDate > maxAllowedDate ? maxAllowedDate : currentDate;
     
@@ -543,13 +552,14 @@ const [categories] = useState<string[]>([
               <input
                 type="month"
                 value={selectedMonth}
-                max="2025-03"
-                onChange={(e) => {
-                  const newValue = e.target.value;
-                  if (newValue <= "2025-03") {
-                    setSelectedMonth(newValue);
-                  }
-                }}
+                              max={selectedCompany === "marielle_stokkelaar" ? "2025-06" : "2025-03"}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                const maxDate = selectedCompany === "marielle_stokkelaar" ? "2025-06" : "2025-03";
+                if (newValue <= maxDate) {
+                  setSelectedMonth(newValue);
+                }
+              }}
                 className="bg-transparent border-none text-lg font-semibold focus:outline-none"
               />
             </div>
@@ -559,8 +569,8 @@ const [categories] = useState<string[]>([
                 const date = new Date(selectedMonth);
                 date.setMonth(date.getMonth() + 1);
                 const newDateString = date.toISOString().slice(0, 7);
-                // Only allow navigation up to March 2025
-                if (newDateString <= "2025-03") {
+                const maxDate = selectedCompany === "marielle_stokkelaar" ? "2025-06" : "2025-03";
+                if (newDateString <= maxDate) {
                   setSelectedMonth(newDateString);
                 }
               }}
@@ -646,10 +656,11 @@ const [categories] = useState<string[]>([
             <input
               type="month"
               value={selectedMonth}
-              max="2025-03"
+              max={selectedCompany === "marielle_stokkelaar" ? "2025-06" : "2025-03"}
               onChange={(e) => {
                 const newValue = e.target.value;
-                if (newValue <= "2025-03") {
+                const maxDate = selectedCompany === "marielle_stokkelaar" ? "2025-06" : "2025-03";
+                if (newValue <= maxDate) {
                   setSelectedMonth(newValue);
                 }
               }}
@@ -658,15 +669,15 @@ const [categories] = useState<string[]>([
           </div>
           
           <button
-            onClick={() => {
-              const date = new Date(selectedMonth);
-              date.setMonth(date.getMonth() + 1);
-              const newDateString = date.toISOString().slice(0, 7);
-              // Only allow navigation up to March 2025
-              if (newDateString <= "2025-03") {
-                setSelectedMonth(newDateString);
-              }
-            }}
+                          onClick={() => {
+                const date = new Date(selectedMonth);
+                date.setMonth(date.getMonth() + 1);
+                const newDateString = date.toISOString().slice(0, 7);
+                const maxDate = selectedCompany === "marielle_stokkelaar" ? "2025-06" : "2025-03";
+                if (newDateString <= maxDate) {
+                  setSelectedMonth(newDateString);
+                }
+              }}
             className="p-2 hover:bg-white/10 rounded-lg transition-all"
           >
             <ChevronRight className="w-5 h-5" />
@@ -943,10 +954,7 @@ const [categories] = useState<string[]>([
   // Place this inside your App component, near other selector components:
 const CompanySelector = () => (
   <div className="mb-6 flex items-center gap-4">
-    {[
-      // { display: "Cook and Pan", value: "cook_and_pan" },
-      { display: "Cozy Heaven", value: "cozy_heaven" }
-    ].map((company) => (
+    {availableCompanies.map((company) => (
       <button
         key={company.value}
         onClick={() => setSelectedCompany(company.value)}
@@ -967,6 +975,14 @@ const CompanySelector = () => (
     try {
       setLoading(true);
       setError(null);
+
+      // Don't fetch if no company is selected yet
+      if (!selectedCompany) {
+        setLoading(false);
+        return;
+      }
+
+      console.log('Fetching data for company:', selectedCompany); // Debug log
 
       const params = {
         // days: timeFilter,
@@ -991,6 +1007,10 @@ const CompanySelector = () => (
         axios.get(`${API_BASE_URL}/report/overall_detail`, { params })
           .catch(() => ({ data: null })),
         axios.get(`${API_BASE_URL}/report/trends`, { params })
+          .then(response => {
+            console.log(`Trends data for ${selectedCompany}:`, response.data); // Debug log
+            return response;
+          })
           .catch(() => ({ data: { trends: [] } })),
         axios.get(`${API_BASE_URL}/report/category_table`, {
           params: { ...params, sentiment: 'positive', limit: showAllPositive ? 10 : 3 }
@@ -1047,6 +1067,48 @@ const CompanySelector = () => (
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Force data refresh when company changes
+  useEffect(() => {
+    if (selectedCompany) {
+      console.log('Company changed to:', selectedCompany, '- forcing data refresh'); // Debug log
+      // Clear existing data before fetching new data
+      setTrendData([]);
+      setOverallData({
+        overall_sentiment: { positive: 0, negative: 0, neutral: 0 },
+        sentiment_counts: { positive: 0, negative: 0, neutral: 0 },
+        total_reviews: 0,
+        last_updated: new Date().toISOString()
+      });
+      fetchData();
+    }
+  }, [selectedCompany, fetchData]);
+
+  // Fetch available companies on component mount
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/companies`);
+        setAvailableCompanies(response.data.companies);
+        // Set the first company as default if companies are available
+        if (response.data.companies.length > 0) {
+          console.log('Setting default company:', response.data.companies[0].value); // Debug log
+          setSelectedCompany(response.data.companies[0].value);
+        }
+      } catch (error) {
+        console.error('Error fetching companies:', error);
+        // Fallback to hardcoded companies if API fails
+        const fallbackCompanies = [
+          { display: "Cozy Heaven", value: "cozy_heaven" },
+          { display: "Marielle Stokkelaar", value: "marielle_stokkelaar" }
+        ];
+        setAvailableCompanies(fallbackCompanies);
+        setSelectedCompany(fallbackCompanies[0].value);
+      }
+    };
+    
+    fetchCompanies();
+  }, [API_BASE_URL]);
 
 
   
@@ -2280,24 +2342,16 @@ const StatsOverview = ({ overallData }: { overallData: OverallReport }) => {
     );
   };
 
-  // Helper function to check if a date is within allowed range
-  const isDateAllowed = (dateString: string) => {
-    const date = new Date(dateString + '-01');
-    return date <= maxAllowedDate;
-  };
+  // Helper functions for date validation - these are not currently used but kept for potential future use
+  // const isDateAllowed = (dateString: string) => {
+  //   const date = new Date(dateString + '-01');
+  //   const maxDate = selectedCompany === "marielle_stokkelaar" ? new Date(2025, 5, 1) : new Date(2025, 2, 1);
+  //   return date <= maxDate;
+  // };
 
-  // Helper function to get max allowed date string for input
-  const getMaxDateString = () => {
-    return "2025-03";
-  };
-
-  // Helper function to check if next month navigation should be disabled
-  const isNextMonthDisabled = () => {
-    const currentDate = new Date(selectedMonth + '-01');
-    const nextMonth = new Date(currentDate);
-    nextMonth.setMonth(nextMonth.getMonth() + 1);
-    return nextMonth > maxAllowedDate;
-  };
+  // const getMaxDateString = () => {
+  //   return selectedCompany === "marielle_stokkelaar" ? "2025-06" : "2025-03";
+  // };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
@@ -2409,7 +2463,8 @@ const StatsOverview = ({ overallData }: { overallData: OverallReport }) => {
         <div className="space-y-4 mb-8">
         <CompanySelector />  
 
-          <PlatformSelector />
+          {/* Hide platform selector for Marielle Stokkelaar */}
+          {selectedCompany !== 'marielle_stokkelaar' && <PlatformSelector />}
           
         </div>
 

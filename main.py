@@ -220,6 +220,37 @@ def convert_object_ids(obj):
         return obj
 
 ############################################
+# Get Available Companies Endpoint
+############################################
+@app.get("/companies")
+async def get_available_companies():
+    """Get list of all available companies in the database"""
+    try:
+        # Get unique companies from the reviews collection
+        companies = await reviews_collection.distinct("company")
+        
+        # Filter out empty/null companies and format them
+        # Also exclude "cook_and_pan" as requested
+        excluded_companies = ["cook_and_pan"]
+        valid_companies = []
+        for company in companies:
+            if company and company.strip() and company not in excluded_companies:
+                # Convert snake_case to display format
+                display_name = company.replace("_", " ").title()
+                valid_companies.append({
+                    "value": company,
+                    "display": display_name
+                })
+        
+        # Sort by display name
+        valid_companies.sort(key=lambda x: x["display"])
+        
+        return {"companies": valid_companies}
+    except Exception as e:
+        logger.error(f"Error fetching companies: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+############################################
 # 1) Overall Sentiment Distribution Endpoint
 ############################################
 @app.get("/report/overall_by_platform", response_model=OverallReport)
@@ -275,6 +306,8 @@ async def report_trends(
     company: str = Query(None)
 ):
     try:
+        logger.info(f"Trends request for company: {company}, platform: {platform}")
+        
         if days is not None:
             now = datetime.utcnow()
             start = now - timedelta(days=days)
@@ -284,13 +317,19 @@ async def report_trends(
 
         match = common_match(platform, start_str, end_str, company)
         match["overall_sentiment"] = {"$in": ["positive", "negative", "neutral"]}
+        match["time_period"] = {"$ne": None, "$exists": True}
+        
+        logger.info(f"MongoDB match query: {match}")
+        
+        # Use actual time_period field for all companies (marielle_stokkelaar has valid dates!)
+        projection = {
+            "year_month": {"$dateToString": {"format": "%Y-%m", "date": "$time_period"}},
+            "overall_sentiment": 1
+        }
 
         pipeline = [
             {"$match": match},
-            {"$project": {
-                "year_month": {"$dateToString": {"format": "%Y-%m", "date": "$time_period"}},
-                "overall_sentiment": 1
-            }},
+            {"$project": projection},
             {"$group": {
                 "_id": {"year_month": "$year_month", "sentiment": "$overall_sentiment"},
                 "count": {"$sum": 1}
@@ -303,6 +342,8 @@ async def report_trends(
         ]
         
         results = await reviews_collection.aggregate(pipeline).to_list(length=None)
+        logger.info(f"Trends aggregation results count: {len(results)}")
+        
         trends = []
         for doc in results:
             month = doc["_id"]
@@ -311,6 +352,7 @@ async def report_trends(
                 data[item["sentiment"]] = item["count"]
             trends.append(data)
         
+        logger.info(f"Final trends data for {company}: {trends}")
         return TrendReport(trends=trends)
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -938,15 +980,18 @@ async def get_category_analysis(category: str, company: str = Query(None)):
 ############################################
 @app.get("/report/available_months")
 async def get_available_months(company: str = Query(..., description="Company name")):
-    """Get available months for monthly analysis data for a specific company (up to March 2025)"""
+    """Get available months for monthly analysis data for a specific company"""
     try:
-        # Set maximum allowed date to March 2025
-        max_allowed_date = datetime(2025, 3, 31)
+        # Set company-specific date limits for monthly reports
+        if company == "marielle_stokkelaar":
+            max_allowed_date = datetime(2025, 6, 30)  # Marielle: up to June 2025
+        else:
+            max_allowed_date = datetime(2025, 3, 31)  # Others: up to March 2025
         
         pipeline = [
             {"$match": {
                 "company": company,
-                "time_period": {"$lte": max_allowed_date}  # Only include data up to March 2025
+                "time_period": {"$lte": max_allowed_date}
             }},
             {"$project": {
                 "year": {"$year": "$time_period"},
@@ -971,8 +1016,10 @@ async def get_available_months(company: str = Query(..., description="Company na
             year = doc["_id"]["year"]
             month = doc["_id"]["month"]
             
-            # Double-check the date limit
-            if year > 2025 or (year == 2025 and month > 3):
+            # Double-check the company-specific date limits
+            if company == "marielle_stokkelaar" and (year > 2025 or (year == 2025 and month > 6)):
+                continue
+            elif company != "marielle_stokkelaar" and (year > 2025 or (year == 2025 and month > 3)):
                 continue
                 
             # Format as YYYY-MM
@@ -999,8 +1046,18 @@ async def get_monthly_analysis(
     year: int = Query(..., description="Year, e.g., 2025"),
     month: int = Query(..., description="Month as an integer, e.g., 4")
 ):
-    # Check if requested date is beyond March 2025
-    if year > 2025 or (year == 2025 and month > 3):
+    # Check company-specific date limits for monthly reports
+    if company == "marielle_stokkelaar" and (year > 2025 or (year == 2025 and month > 6)):
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "message": f"Data access for Marielle Stokkelaar is limited to June 2025 and earlier. Requested: {year}-{month:02d}",
+                "max_allowed": "2025-06",
+                "requested_month": f"{year}-{month:02d}",
+                "company": company
+            }
+        )
+    elif company != "marielle_stokkelaar" and (year > 2025 or (year == 2025 and month > 3)):
         raise HTTPException(
             status_code=400, 
             detail={
@@ -1021,8 +1078,11 @@ async def get_monthly_analysis(
     
     doc = await monthly_reports_collection.find_one(query)
     if not doc:
-        # If no data found, get available months for this company (up to March 2025)
-        max_allowed_date = datetime(2025, 3, 31)
+        # If no data found, get available months for this company
+        if company == "marielle_stokkelaar":
+            max_allowed_date = datetime(2025, 6, 30)  # Marielle: up to June 2025
+        else:
+            max_allowed_date = datetime(2025, 3, 31)  # Others: up to March 2025
         pipeline = [
             {"$match": {
                 "company": company,
@@ -1051,8 +1111,10 @@ async def get_monthly_analysis(
             year_avail = result["_id"]["year"]
             month_avail = result["_id"]["month"]
             
-            # Double-check the date limit
-            if year_avail > 2025 or (year_avail == 2025 and month_avail > 3):
+            # Double-check the company-specific date limits
+            if company == "marielle_stokkelaar" and (year_avail > 2025 or (year_avail == 2025 and month_avail > 6)):
+                continue
+            elif company != "marielle_stokkelaar" and (year_avail > 2025 or (year_avail == 2025 and month_avail > 3)):
                 continue
                 
             available_months.append(f"{year_avail}-{month_avail:02d}")
@@ -1095,6 +1157,8 @@ async def get_shopify_insights():
         "total_orders": document.get("total_orders"),
         "best_selling_products": document.get("best_selling_products"),
     }
+
+# Debug endpoints removed for production
 
 if __name__ == "__main__":
     import uvicorn

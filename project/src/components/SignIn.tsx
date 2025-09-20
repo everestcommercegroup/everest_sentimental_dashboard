@@ -1,4 +1,5 @@
 // src/components/SignIn.tsx
+// NOTE: This component is COMMENTED OUT in App.tsx for direct access to dashboard
 import React, { useState } from 'react';
 import { CircleSlash, Loader2, Mountain } from 'lucide-react';
 import toast from 'react-hot-toast';

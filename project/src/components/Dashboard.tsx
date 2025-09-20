@@ -230,7 +230,14 @@ function MonthlyFeedbackTooltip({ active, payload, label }: any) {
 }
 
 
+// COMMENTED OUT FOR DIRECT ACCESS - onSignOut prop interface
+// interface DashboardProps {
+//   onSignOut: () => void;
+// }
+
 function Dashboard() {
+  // COMMENTED OUT FOR DIRECT ACCESS - Sign out functionality
+  // { onSignOut }: DashboardProps
 
 
   const [selectedCompany, setSelectedCompany] = useState<string>('');

@@ -11,11 +11,12 @@ from bson.objectid import ObjectId
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, HTTPException, status, Depends
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel
-from passlib.context import CryptContext
-import jwt
+# Authentication imports - COMMENTED OUT FOR DIRECT ACCESS
+# from fastapi import FastAPI, HTTPException, status, Depends
+# from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+# from pydantic import BaseModel
+# from passlib.context import CryptContext
+# import jwt
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -51,90 +52,90 @@ monthly_reports_collection = db["sentimental_monthly_reports"]
 users_collection = db["sentimental_dashboard_users"]
 
 
-# # JWT & Password Setup
-SECRET_KEY = os.getenv("SECRET_KEY", "your_secret_key")  # Update for production
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# # JWT & Password Setup - COMMENTED OUT FOR DIRECT ACCESS
+# SECRET_KEY = os.getenv("SECRET_KEY", "your_secret_key")  # Update for production
+# ALGORITHM = "HS256"
+# ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/signin")
+# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/signin")
 
-# Pydantic model for user input
-class UserIn(BaseModel):
-    email: str
-    password: str
+# Pydantic model for user input - COMMENTED OUT FOR DIRECT ACCESS
+# class UserIn(BaseModel):
+#     email: str
+#     password: str
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+# def verify_password(plain_password: str, hashed_password: str) -> bool:
+#     return pwd_context.verify(plain_password, hashed_password)
 
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+# def get_password_hash(password: str) -> str:
+#     return pwd_context.hash(password)
 
-def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
-    to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=15))
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+# def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
+#     to_encode = data.copy()
+#     expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=15))
+#     to_encode.update({"exp": expire})
+#     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+#     return encoded_jwt
 
 
-# Sign-Up Endpoint (only allows emails ending with "@joineverestgroup.com")
-@app.post("/api/signup")
-async def signup(user_in: UserIn):
-    required_domain = "joineverestgroup.com"
-    if not user_in.email.endswith(f"@{required_domain}"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Only {required_domain} domain emails can register"
-        )
-    # Check if user already exists
-    existing_user = await users_collection.find_one({"email": user_in.email})
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    # Store the new user with hashed password
-    hashed_password = get_password_hash(user_in.password)
-    user_doc = {
-        "email": user_in.email,
-        "hashed_password": hashed_password,
-        "created_at": datetime.utcnow()
-    }
-    result = await users_collection.insert_one(user_doc)
-    
-    access_token = create_access_token(
-        data={"sub": user_in.email},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+# Sign-Up Endpoint - COMMENTED OUT FOR DIRECT ACCESS
+# @app.post("/api/signup")
+# async def signup(user_in: UserIn):
+#     required_domain = "joineverestgroup.com"
+#     if not user_in.email.endswith(f"@{required_domain}"):
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=f"Only {required_domain} domain emails can register"
+#         )
+#     # Check if user already exists
+#     existing_user = await users_collection.find_one({"email": user_in.email})
+#     if existing_user:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Email already registered"
+#         )
+#     # Store the new user with hashed password
+#     hashed_password = get_password_hash(user_in.password)
+#     user_doc = {
+#         "email": user_in.email,
+#         "hashed_password": hashed_password,
+#         "created_at": datetime.utcnow()
+#     }
+#     result = await users_collection.insert_one(user_doc)
+#     
+#     access_token = create_access_token(
+#         data={"sub": user_in.email},
+#         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+#     )
+#     return {"access_token": access_token, "token_type": "bearer"}
 
-# Sign-In Endpoint
-@app.post("/api/signin")
-async def signin(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await users_collection.find_one({"email": form_data.username})
-    if not user or not verify_password(form_data.password, user["hashed_password"]):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Incorrect email or password"
-        )
-    access_token = create_access_token(
-        data={"sub": user["email"]},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+# Sign-In Endpoint - COMMENTED OUT FOR DIRECT ACCESS
+# @app.post("/api/signin")
+# async def signin(form_data: OAuth2PasswordRequestForm = Depends()):
+#     user = await users_collection.find_one({"email": form_data.username})
+#     if not user or not verify_password(form_data.password, user["hashed_password"]):
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Incorrect email or password"
+#         )
+#     access_token = create_access_token(
+#         data={"sub": user["email"]},
+#         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+#     )
+#     return {"access_token": access_token, "token_type": "bearer"}
 
-# Verify Token Endpoint
-@app.get("/api/verify")
-async def verify_token(token: str = Depends(oauth2_scheme)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        return {"email": email}
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+# Verify Token Endpoint - COMMENTED OUT FOR DIRECT ACCESS
+# @app.get("/api/verify")
+# async def verify_token(token: str = Depends(oauth2_scheme)):
+#     try:
+#         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+#         email: str = payload.get("sub")
+#         if email is None:
+#             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+#         return {"email": email}
+#     except jwt.PyJWTError:
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 # --- Pydantic Models ---
 class OverallReport(BaseModel):
